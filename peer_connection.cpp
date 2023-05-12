@@ -144,11 +144,12 @@ void lamport_mutex::accept_from(uint16_t id)
         say(this, "Accepted connection from 'P{}' on fd #{}\n", id, sock);
 }
 
-void lamport_mutex::queue_worker()
+/*void lamport_mutex::queue_worker()
 {
 
-}
+}*/
 
+/*
 void lamport_mutex::socket_worker(std::stop_token stoken, lamport_mutex *me)
 {
         std::vector<pollfd> client_fds {me->peers.size()};
@@ -168,7 +169,8 @@ void lamport_mutex::socket_worker(std::stop_token stoken, lamport_mutex *me)
                         continue;
 
                 // remove peers who've closed their connection
-                /*
+                */
+/*
                 std::erase_if(client_fds, [me] (const pollfd &pfd) {
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 say(me, "Peer P{} has been disconnected\n",
@@ -177,7 +179,8 @@ void lamport_mutex::socket_worker(std::stop_token stoken, lamport_mutex *me)
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
-                */
+                *//*
+
 
                 for (auto pfd : client_fds) {
                         DBG("checking fd {}: events: {}\n", pfd.fd, pfd.revents);
@@ -197,12 +200,14 @@ void lamport_mutex::socket_worker(std::stop_token stoken, lamport_mutex *me)
                 }
         }
 }
+*/
 
-void lamport_mutex::server_worker(std::stop_token stoken, lamport_mutex *me)
+/*void lamport_mutex::server_worker(std::stop_token stoken, lamport_mutex *me)
 {
 
-}
+}*/
 
+/*
 void lamport_mutex::handle_msg(lamport_mutex::peer_msg msg, socket_t insock)
 {
         clockmut.lock();
@@ -242,8 +247,9 @@ void lamport_mutex::handle_msg(lamport_mutex::peer_msg msg, socket_t insock)
 //        } while (!my_time.compare_exchange_strong(time, newtime));
 
 }
+*/
 
-server_reply_t lamport_mutex::issue_request(request_t req)
+/*server_reply_t lamport_mutex::issue_request(request_t req)
 {
         clockmut.lock();
 
@@ -260,7 +266,7 @@ server_reply_t lamport_mutex::issue_request(request_t req)
         }
 
         clockmut.unlock();
-}
+}*/
 
 void lamport_mutex::peer_connection::send(timestamp_t time, decltype(peer_msg::type) type) const
 {
@@ -269,7 +275,7 @@ void lamport_mutex::peer_connection::send(timestamp_t time, decltype(peer_msg::t
                                  "Unable to send message to peer");
 }
 
-void lamport_mutex::request_event_t::issue()
+/*void lamport_mutex::request_event_t::issue()
 {
 
-}
+}*/

@@ -29,6 +29,8 @@ endif()
 find_package(OpenSSL REQUIRED)
 target_link_libraries(pa02_server OpenSSL::SSL)
 
+find_package(fmt REQUIRED)
+
 foreach(EXE IN ITEMS ${EXECUTABLES})
-    target_compile_definitions(${EXE} PUBLIC FMT_HEADER_ONLY=1)
+    target_link_libraries(${EXE} fmt::fmt-header-only)
 endforeach()

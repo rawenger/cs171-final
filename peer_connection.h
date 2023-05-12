@@ -86,10 +86,10 @@ class lamport_mutex {
 //    std::priority_queue<std::pair<timestamp_t, client_id_t>> lock_queue;
     std::set<request_event_t> request_q;
 
-    void handle_msg(lamport_mutex::peer_msg msg, socket_t insock);
-    void queue_worker();
-    static void socket_worker(std::stop_token stoken, lamport_mutex *me);
-    static void server_worker(std::stop_token stoken, lamport_mutex *me);
+//    void handle_msg(lamport_mutex::peer_msg msg, socket_t insock);
+//    void queue_worker();
+//    static void socket_worker(std::stop_token stoken, lamport_mutex *me);
+//    static void server_worker(std::stop_token stoken, lamport_mutex *me);
 
 public:
     lamport_mutex(std::string my_hostname, int my_port, int n_connections, uint16_t client_id);
@@ -98,5 +98,5 @@ public:
     void connect_to(client_id_t id, int peer_port, const std::string &peer_hostname);
     void accept_from(client_id_t id);
 
-    server_reply_t issue_request(request_t req);
+//    server_reply_t issue_request(request_t req);
 };

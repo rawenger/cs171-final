@@ -6,5 +6,6 @@ build
 .git
 test
 *.o
-pa02_client
-pa02_server
+final_client
+final_server
+.vscode
