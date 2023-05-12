@@ -6,3 +6,5 @@ test
 *.swp
 pa01_server
 pa01_client
+.vscode
+.DS_Store
