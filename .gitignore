@@ -1,0 +1,8 @@
+cmake-build-*
+build
+.idea
+test
+*.o
+*.swp
+pa01_server
+pa01_client

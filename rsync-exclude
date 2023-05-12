@@ -1,0 +1,10 @@
+cmake-build-debug
+cmake-build-autograder
+cmake-build-release
+.idea
+build
+.git
+test
+*.o
+pa02_client
+pa02_server
