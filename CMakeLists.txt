@@ -11,7 +11,7 @@ include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/cereal/include")
 
 if (${CMAKE_HOST_APPLE})
     execute_process(
-        COMMAND brew --prefix openssl
+        COMMAND brew --prefix openssl@3.0
         OUTPUT_VARIABLE OPENSSL_HOME
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
