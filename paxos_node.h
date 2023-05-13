@@ -57,8 +57,6 @@ class paxos_node {
     int my_port;
     std::atomic_flag update_pfds{true}; // no atomic we die like men (but actually we don't need one)
 
-    std::vector<pollfd> pfds;
-
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
     void connect_to(client_id_t id, int peer_port, const std::string &peer_hostname);

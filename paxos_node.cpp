@@ -76,12 +76,14 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         continue;
 
                 // remove peers who've closed their connection
-
                 std::erase_if(client_fds, [me] (const pollfd &pfd) {
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd).client_id);
                                 close(pfd.fd);
+                                me->pmut.lock();
+                                me->peers.erase(pfd.fd);
+                                me->pmut.unlock();
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
@@ -175,6 +177,9 @@ paxos_node::paxos_node(const pa2_cfg::system_cfg &config, client_id_t my_id, std
 
                 delete[] peers_up;
         }
+
+        auto poller = new std::jthread{polling_loop, this};
+        poller->detach();
 }
 
 [[noreturn]]
