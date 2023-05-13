@@ -10,9 +10,9 @@
 #include "blockchain.h"
 #include "request.h"
 #include "sema_q.h"
-#include "pa2_cfg.h"
+#include "cs171_cfg.h"
 
-using pa2_cfg::socket_t, pa2_cfg::client_id_t;
+using cs171_cfg::socket_t, cs171_cfg::client_id_t;
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port);
 
@@ -63,6 +63,6 @@ class paxos_node {
 
 public:
 
-    paxos_node(const pa2_cfg::system_cfg &config, client_id_t my_id, std::string node_hostname);
+    paxos_node(const cs171_cfg::system_cfg &config, client_id_t my_id, std::string node_hostname);
 };
 

@@ -5,7 +5,7 @@
 #pragma once
 #include <thread>
 #include <vector>
-namespace pa2_cfg {
+namespace cs171_cfg {
     using namespace std::chrono_literals;
     constexpr const char *SERVER_CFG = "server.csv";
     constexpr const char *CLIENT_CFG = "clients.csv";

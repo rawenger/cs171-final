@@ -22,7 +22,7 @@
 
 #include "paxos_node.h"
 #include "peer_connection.h"
-#include "pa2_cfg.h"
+#include "cs171_cfg.h"
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 {
@@ -124,7 +124,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
  *      - P2 recieves num_peers from P1
  *      - P2 receives peers_up from P1
  */
-paxos_node::paxos_node(const pa2_cfg::system_cfg &config, client_id_t my_id, std::string node_hostname)
+paxos_node::paxos_node(const cs171_cfg::system_cfg &config, client_id_t my_id, std::string node_hostname)
 :       my_id(my_id),
         connection_arbitrator(config.arbitrator),
         my_hostname(std::move(node_hostname)),
@@ -143,13 +143,13 @@ paxos_node::paxos_node(const pa2_cfg::system_cfg &config, client_id_t my_id, std
                         perror("Unable to connect to arbitrator node");
                         exit(EXIT_FAILURE);
                 }
-                if (pa2_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
+                if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
                         perror("Unable to send PID to connection arbitrator");
                         exit(EXIT_FAILURE);
                 }
 
                 MSG_TYPE im_new = IM_NEW;
-                pa2_cfg::send_with_delay<false>(sock, &im_new, sizeof im_new, 0);
+                cs171_cfg::send_with_delay<false>(sock, &im_new, sizeof im_new, 0);
 
                 uint8_t n_peers_up;
                 if (recv(sock, &n_peers_up, sizeof n_peers_up, 0) < 0) {
@@ -250,8 +250,8 @@ void paxos_node::send_peer_list(socket_t sock)
 
         auto npeers = static_cast<uint8_t>(peers_up.size());
 
-        pa2_cfg::send_with_delay(sock, &npeers, sizeof npeers, 0);
-        pa2_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
+        cs171_cfg::send_with_delay(sock, &npeers, sizeof npeers, 0);
+        cs171_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
 }
 
 void paxos_node::connect_to(client_id_t id, int peer_port, const std::string &peer_hostname)
@@ -275,10 +275,10 @@ void paxos_node::connect_to(client_id_t id, int peer_port, const std::string &pe
         peers.emplace(sock, peer_connection{sock, id});
         pmut.unlock();
 
-        pa2_cfg::send_with_delay(sock, &my_id, sizeof my_id, 0, "Unable to send ID to peer");
+        cs171_cfg::send_with_delay(sock, &my_id, sizeof my_id, 0, "Unable to send ID to peer");
         MSG_TYPE handshake = HANDSHAKE_COMPLETE;
-        pa2_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
-                                 "Unable to send handshake to peer");
+        cs171_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
+                                   "Unable to send handshake to peer");
 
         DBG("Connected to peer PID {}\n", id);
 //        say(this, "Connected to peer ID 'P{}' on fd #{}\n", id, sock);

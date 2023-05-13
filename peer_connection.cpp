@@ -27,7 +27,7 @@
 
 #include "peer_connection.h"
 #include "debug.h"
-#include "pa2_cfg.h"
+#include "cs171_cfg.h"
 
 #define say(lpm__, fmt__, args__...)    fmt::print("[P{} @ t_{}] " fmt__,\
                                         lpm__->my_id,                    \

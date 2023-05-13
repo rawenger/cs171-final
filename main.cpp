@@ -21,7 +21,7 @@
 #include "request.h"
 #include "debug.h"
 #include "sema_q.h"
-#include "pa2_cfg.h"
+#include "cs171_cfg.h"
 #include "paxos_node.h"
 
 struct exit_t {};
@@ -31,18 +31,25 @@ using cmd_t = std::variant<request_t, exit_t, wait_t>;
 
 static client_id_t my_id;
 static std::string my_hostname;
-//static std::unique_ptr<lamport_mutex> lpmut;
 
 static cmd_t parse_cmd(std::string_view &&msg);
 
 static void build_connections(int serv_sock);
 static void connect_server(int serv_sock);
 
+// TODO: requires fmtlib 10.0, which has not been packaged by homebrew yet.
+//  but this speeds up compilation times by a bit since less templates.
+//std::string format_as(request_t req)
+//{
+//        return (req.type == request_t::BAL_REQUEST
+//                 ? fmt::format("BALANCE {{.client = {}}}",
+//                               (uint16_t) req.bal.client)
+//                 : fmt::format("TRANSFER {{.recv = {}, .amt = {}}}",
+//                               (uint16_t) req.tr.recv, (uint16_t) req.tr.amt));
+//}
+
 int main(int argc, char **argv)
 {
-        int serv_sock;
-        std::string serv_hostname;
-
         if (argc < 2) {
                 fmt::print(stderr, "Usage: {} <node-id>\n", argv[0]);
                 exit(EXIT_FAILURE);
@@ -53,18 +60,11 @@ int main(int argc, char **argv)
         else
                 my_id = atoi(argv[1]);
 
-        serv_sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (serv_sock < 0) {
-                perror("Unable to create out-socket");
-                exit(EXIT_FAILURE);
-        }
-
-        /* Constructing this object will pen and parse the config.csv file */
-        pa2_cfg::system_cfg config{};
+        /* Constructing this object will open and parse the config.csv file */
+        cs171_cfg::system_cfg config{};
 
         paxos_node node{config, my_id, my_hostname};
 
-//        build_connections(serv_sock);
 
         while (1) {
                 std::string in;
@@ -90,17 +90,14 @@ int main(int argc, char **argv)
                 }
 
                 // LOCK LAMPORT MUTEX
-                pa2_cfg::send_with_delay(serv_sock, &req, sizeof req, 0,
-                                         "Unable to send issue_request to server");
 
                 uint8_t response;
-                recv(serv_sock, &response, sizeof response, 0);
-
                 // UNLOCK LAMPORT MUTEX
                 if (response)
                         fmt::print("[Server]: Success!\n");
                 else
                         fmt::print("[Server]: Insufficient Balance\n");
+
 //                reqs.push(req);
         }
 //        socket_worker.request_stop();
@@ -109,53 +106,17 @@ int main(int argc, char **argv)
 
 //        socket_worker.join();
 
-        shutdown(serv_sock, SHUT_RDWR);
-        close(serv_sock);
-
         return 0;
 }
 
-static void build_connections(int serv_sock)
-{
-        std::thread serv_connect{connect_server, serv_sock};
-
-
-//
-//        /*
-//         * Okay, we've parsed our config file. Now, we wait for the server to greenlight us,
-//         * then begin connecting to everybody.
-//         */
-//        lpmut = std::make_unique<lamport_mutex>(my_hostname,
-//                                                config.my_port,
-//                                                config.accept_from.size(),
-//                                                my_id);
-//
-//        for (const auto &p : config.accept_from)
-//                lpmut->accept_from(p);
-//
-//        // Wait for server to tell us that everyone's connected
-//        // if we are in charge of initiating the peer network.
-//        serv_connect.join();
-//        if (config.accept_from.empty()) {
-//                uint8_t greenlight;
-//                recv(serv_sock, &greenlight, sizeof greenlight, 0);
-//                assert(greenlight == 1);
-//        }
-//
-//        for (const auto &[id, port, hostname] : config.peers)
-//                lpmut->peers(id, port, hostname);
-
-        DBG("All peers connected successfully!\n");
-}
-
-pa2_cfg::system_cfg::system_cfg()
+cs171_cfg::system_cfg::system_cfg()
 {
         /* line format is 'ID, hostname, port'
          * lines beginning with '#' are ignored
          */
-        std::ifstream in {pa2_cfg::CLIENT_CFG};
+        std::ifstream in {cs171_cfg::CLIENT_CFG};
         if (!in) {
-                fmt::print(stderr, "Unable to open file '{}'\n", pa2_cfg::CLIENT_CFG);
+                fmt::print(stderr, "Unable to open file '{}'\n", cs171_cfg::CLIENT_CFG);
                 return;
         }
 
@@ -208,37 +169,6 @@ pa2_cfg::system_cfg::system_cfg()
 
 //        DBG("connect_to: [{}]\n", fmt::join(connect_to, ", "));
 //        DBG("accept_from: [{}]\n", fmt::join(accept_from, ", "));
-}
-
-static void connect_server(int serv_sock)
-{
-        /* parse the server config */
-        std::string serv_hostname;
-        int server_port;
-        {
-                std::ifstream in{pa2_cfg::SERVER_CFG};
-                std::string portstr;
-                std::getline(in, serv_hostname, ',');
-                if (in.peek() == ' ')
-                        in.ignore();
-                std::getline(in, portstr);
-                auto portview = std::string_view{portstr};
-                std::from_chars(portview.cbegin(), portview.cend(), server_port);
-                in.close();
-        }
-
-        auto serv_addr = hostname_lookup(serv_hostname, server_port);
-
-        if (connect(serv_sock, serv_addr.get(), sizeof(sockaddr_in)) < 0) {
-                perror("Unable to connect to server");
-                exit(EXIT_FAILURE);
-        }
-
-        /* Sending our ID tells the server we are up and waiting to make connections
-         * to our peers.
-         */
-        pa2_cfg::send_with_delay(serv_sock, &my_id, 1, 0,
-                                 "Unable to communicate with server");
 }
 
 /* This is disgusting. I hate string parsing.

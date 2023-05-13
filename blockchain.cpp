@@ -11,6 +11,9 @@
 #include "debug.h"
 #include "blockchain.h"
 
+blockchain blockchain::BLOCKCHAIN;
+static EVP_MD_CTX *sha256_ctx;
+
 template<>
 struct fmt::formatter<transaction> {
     char presentation = 'f'; // 'f' means tuple form (for printing); 'e' is raw concat (for hashing)
@@ -38,13 +41,13 @@ struct fmt::formatter<transaction> {
 };
 
 template<>
-struct fmt::formatter<block> {
+struct fmt::formatter<blockchain::block> {
     constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
             return ctx.end();
     }
 
     template <typename FormatContext>
-    auto format(const block &blk, FormatContext &ctx) const -> decltype(ctx.out()) {
+    auto format(const blockchain::block &blk, FormatContext &ctx) const -> decltype(ctx.out()) {
             return fmt::format_to(ctx.out(), "({:f}, {})", blk.T, blk.H);
     }
 };
@@ -62,12 +65,8 @@ struct fmt::formatter<u256> {
     }
 };
 
-blockchain blockchain::BLOCKCHAIN;
 
-/* this isn't great design but who cares */
-static EVP_MD_CTX *sha256_ctx;
-
-block::block(transaction t, block *prev)
+blockchain::block::block(transaction t, block *prev)
  :      P(prev),
         N(0),
         T(t)
@@ -78,7 +77,7 @@ block::block(transaction t, block *prev)
         compute_nonce();
 }
 
-void block::compute_nonce()
+void blockchain::block::compute_nonce()
 {
         assert(sha256_ctx != nullptr);
         u256 sha_out {0};
@@ -92,7 +91,7 @@ void block::compute_nonce()
         }
 }
 
-void block::hash(u256 &out)
+void blockchain::block::hash(u256 &out)
 {
         /* OK, so let's get this straight:
          * - we have perfectly good numbers sitting around on our blockchain

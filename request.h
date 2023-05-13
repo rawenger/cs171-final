@@ -30,6 +30,7 @@ using server_reply_t = int;
 
 #ifndef NDEBUG
 #include "debug.h"
+/*
 template <> struct fmt::formatter<request_t> {
   // Presentation format: 'e': bits, 'f': individual fields
   char presentation = 'f';
@@ -75,4 +76,8 @@ template <> struct fmt::formatter<request_t> {
                  );
   }
 };
+*/
+
+//std::string format_as(request_t req);
+
 #endif

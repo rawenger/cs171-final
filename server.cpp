@@ -26,7 +26,7 @@
 #include "blockchain.h"
 #include "request.h"
 #include "debug.h"
-#include "pa2_cfg.h"
+#include "cs171_cfg.h"
 
 static constexpr int MAX_CLIENT_CONNECTIONS = 100;
 

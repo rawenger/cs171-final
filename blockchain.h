@@ -25,19 +25,20 @@ union transaction {
 } __attribute__((packed));
 static_assert(sizeof(transaction) == 6);
 
-struct block {
-    explicit block(transaction t, block *prev=nullptr);
-    ~block() { delete P; }
-    void compute_nonce();
-    void hash(u256 &out);
-
-    u256 H{0}; // hash of previous
-    block *P;
-    uint64_t N;
-    transaction T;
-};
-
 class blockchain {
+    struct block {
+        explicit block(transaction t, block *prev=nullptr);
+        ~block() { delete P; }
+        void compute_nonce();
+        void hash(u256 &out);
+
+        u256 H{0}; // hash of previous
+        block *P;
+        uint64_t N;
+        transaction T;
+    };
+    friend struct fmt::formatter<blockchain::block>;
+
     block *tail{nullptr};
     std::recursive_mutex mut{};
     using lock_gd =
