@@ -33,31 +33,6 @@
                                         lpm__->my_id,                    \
                                         lpm__->my_time, ##args__)
 
-std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
-{
-         addrinfo addr_hint = {
-                .ai_family = AF_INET,
-                .ai_socktype = SOCK_STREAM,
-        };
-
-        addrinfo *m_addrinfo;
-
-        if (getaddrinfo(hostname.c_str(), nullptr, &addr_hint, &m_addrinfo) < 0
-            || m_addrinfo == nullptr)
-        {
-                perror("getaddrinfo");
-                exit(EXIT_FAILURE);
-        }
-
-        reinterpret_cast<sockaddr_in *>(m_addrinfo->ai_addr)->sin_port = htons(port);
-
-        auto res = std::make_unique<sockaddr>(*m_addrinfo->ai_addr);
-
-        freeaddrinfo(m_addrinfo);
-
-        return res;
-}
-
 lamport_mutex::lamport_mutex(std::string my_hostname,
                              int my_port,
                              int n_connections,

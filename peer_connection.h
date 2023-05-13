@@ -18,10 +18,8 @@
 #include "request.h"
 #include "sema_q.h"
 
-using client_id_t = uint16_t;
+using client_id_t = uint8_t;
 using socket_t = int;
-
-std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port);
 
 class lamport_mutex {
     using timestamp_t = uint64_t;
@@ -80,8 +78,6 @@ class lamport_mutex {
     std::unique_ptr<sockaddr> my_addr {nullptr};
     std::unordered_map<socket_t, peer_connection> peers;
     std::string my_hostname;
-    timestamp_t my_time {0}; // lamport local time
-    std::mutex clockmut;
     client_id_t my_id {}; // client ID
 //    std::priority_queue<std::pair<timestamp_t, client_id_t>> lock_queue;
     std::set<request_event_t> request_q;

@@ -4,6 +4,7 @@
 
 #pragma once
 #include <thread>
+#include <vector>
 namespace pa2_cfg {
     using namespace std::chrono_literals;
     constexpr const char *SERVER_CFG = "server.csv";
@@ -49,4 +50,17 @@ namespace pa2_cfg {
 
             return static_cast<ssize_t>(length);
     }
+
+    using client_id_t = uint8_t;
+    using socket_t = int;
+    struct system_cfg {
+        // <PID, port #, hostname>
+        using client_tuple = std::tuple<client_id_t, int, std::string>;
+        std::vector<client_tuple> peers;
+        size_t n_peers;
+        int my_port;
+        client_id_t arbitrator;
+
+        system_cfg();
+    };
 };

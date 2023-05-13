@@ -1,4 +1,4 @@
 #P0, localhost, 9004
 P1, localhost, 9001
 P2, localhost, 9002
-#P3, localhost, 9003
+P3, localhost, 9003

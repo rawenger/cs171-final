@@ -14,16 +14,15 @@
 #include <thread>
 #include <variant>
 #include <fstream>
-#include <latch>
 #include <cassert>
 #include <forward_list>
-#include <set>
 
 #include "peer_connection.h"
 #include "request.h"
 #include "debug.h"
 #include "sema_q.h"
 #include "pa2_cfg.h"
+#include "paxos_node.h"
 
 struct exit_t {};
 using wait_t = std::chrono::seconds;
@@ -32,19 +31,9 @@ using cmd_t = std::variant<request_t, exit_t, wait_t>;
 
 static client_id_t my_id;
 static std::string my_hostname;
-static std::unique_ptr<lamport_mutex> lpmut;
+//static std::unique_ptr<lamport_mutex> lpmut;
 
 static cmd_t parse_cmd(std::string_view &&msg);
-
-struct client_cfg {
-        using client_tuple = std::tuple<client_id_t, int, std::string>;
-        std::vector<client_id_t> accept_from;
-        std::vector<client_tuple> connect_to;
-        size_t n_peers;
-        int my_port;
-
-        client_cfg();
-};
 
 static void build_connections(int serv_sock);
 static void connect_server(int serv_sock);
@@ -55,7 +44,7 @@ int main(int argc, char **argv)
         std::string serv_hostname;
 
         if (argc < 2) {
-                fmt::print(stderr, "Usage: {} <client-id>\n", argv[0]);
+                fmt::print(stderr, "Usage: {} <node-id>\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
 
@@ -70,34 +59,12 @@ int main(int argc, char **argv)
                 exit(EXIT_FAILURE);
         }
 
-        build_connections(serv_sock);
+        /* Constructing this object will pen and parse the config.csv file */
+        pa2_cfg::system_cfg config{};
 
+        paxos_node node{config, my_id, my_hostname};
 
-//        std::jthread socket_worker ([&](std::stop_token stoken)
-//        {
-//                char buf[1024];
-//                while (1) {
-//                        request_t req = reqs.pop();
-//
-//                        if (req.type == request_t::INVALID_REQUEST)
-//                                break;
-//
-//                        DBG("Sending {:f}\n", req);
-//
-//                        send(out_sock, &req, sizeof req, 0);
-//
-//                        bzero(buf, sizeof buf);
-//                        if (recv(out_sock, buf, sizeof buf, 0) < 0) {
-//                                perror("Unable to read from socket");
-//                                exit(EXIT_FAILURE);
-//                        }
-//
-//                        fmt::print("{}\n", buf);
-//                }
-//
-//                if (!stoken.stop_requested())
-//                        DBG_ERR("Invalid request ended up in queue!\n");
-//        });
+//        build_connections(serv_sock);
 
         while (1) {
                 std::string in;
@@ -152,37 +119,36 @@ static void build_connections(int serv_sock)
 {
         std::thread serv_connect{connect_server, serv_sock};
 
-        /* Constructing this object will pen and parse the config.csv file */
-        client_cfg config{};
 
-        /*
-         * Okay, we've parsed our config file. Now, we wait for the server to greenlight us,
-         * then begin connecting to everybody.
-         */
-        lpmut = std::make_unique<lamport_mutex>(my_hostname,
-                                                config.my_port,
-                                                config.accept_from.size(),
-                                                my_id);
-
-        for (const auto &p : config.accept_from)
-                lpmut->accept_from(p);
-
-        // Wait for server to tell us that everyone's connected
-        // if we are in charge of initiating the peer network.
-        serv_connect.join();
-        if (config.accept_from.empty()) {
-                uint8_t greenlight;
-                recv(serv_sock, &greenlight, sizeof greenlight, 0);
-                assert(greenlight == 1);
-        }
-
-        for (const auto &[id, port, hostname] : config.connect_to)
-                lpmut->connect_to(id, port, hostname);
+//
+//        /*
+//         * Okay, we've parsed our config file. Now, we wait for the server to greenlight us,
+//         * then begin connecting to everybody.
+//         */
+//        lpmut = std::make_unique<lamport_mutex>(my_hostname,
+//                                                config.my_port,
+//                                                config.accept_from.size(),
+//                                                my_id);
+//
+//        for (const auto &p : config.accept_from)
+//                lpmut->accept_from(p);
+//
+//        // Wait for server to tell us that everyone's connected
+//        // if we are in charge of initiating the peer network.
+//        serv_connect.join();
+//        if (config.accept_from.empty()) {
+//                uint8_t greenlight;
+//                recv(serv_sock, &greenlight, sizeof greenlight, 0);
+//                assert(greenlight == 1);
+//        }
+//
+//        for (const auto &[id, port, hostname] : config.peers)
+//                lpmut->peers(id, port, hostname);
 
         DBG("All peers connected successfully!\n");
 }
 
-client_cfg::client_cfg()
+pa2_cfg::system_cfg::system_cfg()
 {
         /* line format is 'ID, hostname, port'
          * lines beginning with '#' are ignored
@@ -194,6 +160,7 @@ client_cfg::client_cfg()
         }
 
         n_peers = 0;
+        arbitrator = -1UL; // NOLINT
 
         while (!in.eof()) {
                 if (in.peek() == '#') {
@@ -213,6 +180,7 @@ client_cfg::client_cfg()
                 std::getline(in, hostname, ',');
                 in.ignore(256, ' ');
                 in >> port;
+
                 if (id == my_id) {
                         my_port = port;
                         my_hostname = hostname;
@@ -220,21 +188,21 @@ client_cfg::client_cfg()
                 } else {
                         ++n_peers;
                 }
+
+                if (id < arbitrator)
+                        arbitrator = id;
+
                 DBG("{{id: {}, host: {}, port: {}}}\n",
                     id, hostname, port);
                 in.ignore(256, '\n');
 
-                if (id < my_id) {
-                        auto pos = std::lower_bound(accept_from.begin(), accept_from.end(), id);
-                        accept_from.insert(pos, id);
-                } else if (id > my_id) {
-                        auto pos = std::lower_bound(connect_to.begin(), connect_to.end(), id,
-                                                    [] (const client_tuple &other, int id1) -> bool
-                                                    {
-                                                        return get<0>(other) > id1;
-                                                    });
-                        connect_to.emplace(pos, id, port, std::move(hostname));
-                }
+                auto pos = std::lower_bound(peers.begin(), peers.end(), id,
+                                            [] (const client_tuple &other, int id1) -> bool
+                                            {
+                                                return get<0>(other) < id1;
+                                            });
+
+                peers.emplace(pos, id, port, std::move(hostname));
         }
         in.close();
 

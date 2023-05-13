@@ -1,13 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-project(final)
+project(cs171_final)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_COMPILER g++)
 
-set(EXECUTABLES final_server final_client)
+set(EXECUTABLES cs171_final)
 
-add_executable(final_server server.cpp blockchain.cpp)
-add_executable(final_client client.cpp peer_connection.cpp)
+add_executable(cs171_final main.cpp paxos_node.cpp blockchain.cpp)
 
 if (${CMAKE_HOST_APPLE})
     execute_process(
@@ -27,7 +26,7 @@ else()
 endif()
 
 find_package(OpenSSL REQUIRED)
-target_link_libraries(final_server OpenSSL::SSL)
+target_link_libraries(cs171_final OpenSSL::SSL)
 
 find_package(fmt REQUIRED)
 
