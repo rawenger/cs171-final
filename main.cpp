@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cstring>
 #include <vector>
+#include <sstream>
 #include <string_view>
 #include <charconv>
 #include <thread>
@@ -24,9 +25,10 @@
 #include "paxos_node.h"
 
 struct exit_t {};
+struct peers_t {};
 using wait_t = std::chrono::seconds;
 
-using cmd_t = std::variant<request_t, exit_t, wait_t>;
+using cmd_t = std::variant<request_t, exit_t, wait_t, peers_t>;
 
 static node_id_t my_id;
 static std::string my_hostname;
@@ -76,6 +78,16 @@ int main(int argc, char **argv)
 
                 else if (std::holds_alternative<wait_t>(cmd)) {
                         std::this_thread::sleep_for(std::get<wait_t>(cmd));
+                        continue;
+                }
+
+                else if (std::holds_alternative<peers_t>(cmd)) {
+                        std::stringstream fmt;
+                        for (const auto &[socket, peer_connection] : node.borrow_peers()) {
+                                fmt << fmt::format("P{:d} ← {}, ", peer_connection.client_id, socket);
+                        }
+                        std::string readable = fmt.str();
+                        std::cout << readable.substr(0, readable.size() - 2) << std::endl;
                         continue;
                 }
 
@@ -203,6 +215,8 @@ static cmd_t parse_cmd(std::string_view &&msg)
                         return res;
                 }
                 return wait_t{wait};
+        } else if (*word == "peers") {
+                return peers_t {};
         } else {
                 fmt::print(stderr, "Malformed input.\n");
                 return res;

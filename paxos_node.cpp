@@ -26,6 +26,10 @@
 #include "cs171_cfg.h"
 #include "paxos_msg.h"
 
+const std::map<socket_t, peer_connection> &paxos_node::borrow_peers() const
+{
+        return peers;
+}
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 {

@@ -60,6 +60,7 @@ public:
 
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
 
+    const std::map<socket_t, peer_connection> &borrow_peers() const;
     void broadcast(transaction t);
 };
 
