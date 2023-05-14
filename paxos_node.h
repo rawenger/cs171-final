@@ -28,7 +28,7 @@ struct peer_connection {
     peer_connection &operator=(const peer_connection &other) = delete;
     peer_connection &operator=(peer_connection &&other) = delete;
 
-    ~peer_connection() { shutdown(sock, SHUT_RDWR); close(sock); }
+//    ~peer_connection() { shutdown(sock, SHUT_RDWR); close(sock); }
 
 //    void send(timestamp_t time, decltype(peer_msg::type) type) const;
 
@@ -50,7 +50,7 @@ class paxos_node {
     node_id_t connection_arbitrator;
     std::string my_hostname;
     int my_port;
-    std::atomic_flag update_pfds{true}; // no atomic we die like men (but actually we don't need one)
+    std::atomic_flag update_pfds{false}; // no atomic we die like men (but actually we don't need one)
 
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
@@ -59,5 +59,7 @@ class paxos_node {
 public:
 
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
+
+    void broadcast(transaction t);
 };
 

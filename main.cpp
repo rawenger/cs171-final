@@ -85,13 +85,14 @@ int main(int argc, char **argv)
                 }
 
                 // LOCK LAMPORT MUTEX
-
-                uint8_t response;
+                transaction tr{ req.tr.amt, my_id, req.tr.recv };
+                node.broadcast(tr);
+//                uint8_t response;
                 // UNLOCK LAMPORT MUTEX
-                if (response)
-                        fmt::print("[Server]: Success!\n");
-                else
-                        fmt::print("[Server]: Insufficient Balance\n");
+//                if (response)
+//                        fmt::print("[Server]: Success!\n");
+//                else
+//                        fmt::print("[Server]: Insufficient Balance\n");
 
 //                reqs.push(req);
         }

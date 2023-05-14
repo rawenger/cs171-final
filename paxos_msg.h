@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <tuple>
 
-#include "cs171_cfg.h"
+//#include "cs171_cfg.h"
 #include "blockchain.h"
 
 namespace paxos_msg {
@@ -27,7 +27,7 @@ namespace paxos_msg {
         /* no additional data needs to be read */
     };
 
-    using ballot_num = std::tuple<size_t, cs171_cfg::node_id_t, size_t>;
+    using ballot_num = std::tuple<size_t, uint8_t, size_t>;
 
     using prepare_msg = ballot_num;
     using accept_msg = ballot_num;

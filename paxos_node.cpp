@@ -4,8 +4,8 @@
 
 #ifdef linux
 #define _GNU_SOURCE
-#define SOCK_REVENT_CLOSE       POLLRDHUP
 #define SOCK_EVENT_CLOSE        POLLRDHUP
+#define SOCK_REVENT_CLOSE       POLLRDHUP
 #else
 #define SOCK_EVENT_CLOSE        0
 #define SOCK_REVENT_CLOSE       POLLHUP
@@ -83,7 +83,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd).client_id);
-//                                close(pfd.fd);
+                                close(pfd.fd);
                                 me->pmut.lock();
                                 me->peers.erase(pfd.fd);
                                 me->pmut.unlock();
@@ -105,6 +105,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         contents.reserve(msg_size);
                         recv(pfd.fd, contents.data(), msg_size, 0);
                         auto msg = paxos_msg::read_msg(contents);
+                        DBG("BREAKPOINT HERE");
 
                         switch (msg.type) {
                                 // TODO
@@ -147,12 +148,14 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                         perror("Unable to connect to arbitrator node");
                         exit(EXIT_FAILURE);
                 }
+                DBG("Connected to peer PID {}", connection_arbitrator);
+
                 if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
                         perror("Unable to send PID to connection arbitrator");
                         exit(EXIT_FAILURE);
                 }
 
-                MSG_TYPE im_new = IM_NEW;
+                paxos_msg::MSG_TYPE im_new = paxos_msg::IM_NEW;
                 cs171_cfg::send_with_delay<false>(sock, &im_new, sizeof im_new, 0);
 
                 uint8_t n_peers_up;
@@ -226,13 +229,13 @@ void paxos_node::listen_connections()
 
                 DBG("Accepted incoming connection from PID {}\n", newid);
 
-                MSG_TYPE action;
+                paxos_msg::MSG_TYPE action;
                 recv(newsock, &action, sizeof action, 0);
 
-                if (action == IM_NEW) {
+                if (action == paxos_msg::IM_NEW) {
                         send_peer_list(newsock);
                 } else {
-                        assert(action == HANDSHAKE_COMPLETE);
+                        assert(action == paxos_msg::HANDSHAKE_COMPLETE);
                 }
 
                 pmut.lock();
@@ -274,18 +277,36 @@ void paxos_node::connect_to(node_id_t id, int peer_port, const std::string &peer
                 exit(EXIT_FAILURE);
         }
 
+        cs171_cfg::send_with_delay(sock, &my_id, sizeof my_id, 0, "Unable to send ID to peer");
+        paxos_msg::MSG_TYPE handshake = paxos_msg::HANDSHAKE_COMPLETE;
+        cs171_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
+                                   "Unable to send handshake to peer");
+
         pmut.lock();
         assert(!peers.contains(sock));
         peers.emplace(sock, peer_connection{sock, id});
         pmut.unlock();
 
-        cs171_cfg::send_with_delay(sock, &my_id, sizeof my_id, 0, "Unable to send ID to peer");
-        MSG_TYPE handshake = HANDSHAKE_COMPLETE;
-        cs171_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
-                                   "Unable to send handshake to peer");
-
         DBG("Connected to peer PID {}\n", id);
 //        say(this, "Connected to peer ID 'P{}' on fd #{}\n", id, sock);
+}
+
+void paxos_node::broadcast(transaction t)
+{
+        paxos_msg::msg msg{.type = paxos_msg::PROMISE,
+                        .prom = {
+                                {1, my_id, 2},
+                                {3, my_id, 4},
+                                t
+                        }
+        };
+
+        auto bytes = paxos_msg::create_msg(msg);
+
+        for (const auto &[sock, _] : this->peers) {
+                cs171_cfg::send_with_delay(sock, bytes.c_str(), bytes.size(), 0,
+                                           "NONONONO");
+        }
 }
 
 
