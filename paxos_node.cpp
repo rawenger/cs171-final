@@ -102,7 +102,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         msg_size = ntohs(msg_size);
 
                         std::string contents;
-                        contents.reserve(msg_size);
+                        contents.resize(msg_size);
                         recv(pfd.fd, contents.data(), msg_size, 0);
                         auto msg = paxos_msg::read_msg(contents);
                         DBG("BREAKPOINT HERE");
@@ -160,29 +160,40 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
                 uint8_t n_peers_up;
                 if (recv(sock, &n_peers_up, sizeof n_peers_up, 0) < 0) {
-                        perror("Unable to read network info");
+                        perror("Unable to recv peer network info");
                         exit(EXIT_FAILURE);
                 }
 
-                auto *peers_up = new uint8_t[n_peers_up];
-                recv(sock, peers_up, n_peers_up, 0);
+                pmut.lock();
+                peers.emplace(sock, peer_connection{sock, connection_arbitrator});
+                pmut.unlock();
 
-                // start listening for new connections from other nodes
-                // sorting allows us to do this in O(n log n) instead of O(n^2)
-                std::sort(peers_up, peers_up + n_peers_up);
+                if (n_peers_up > 0) {
+                        auto *peers_up = new uint8_t[n_peers_up];
+                        if (recv(sock, peers_up, n_peers_up, 0) < 0)
+                                perror("recv() peers_up");
 
-                int peer = 0;
-                for (const auto &[pid, pport, phostname] : config.peers) {
-                        if (peers_up[peer] != pid)
-                                continue;
+                        // start listening for new connections from other nodes
+                        // sorting allows us to do this in O(n log n) instead of O(n^2)
+                        std::sort(peers_up, peers_up + n_peers_up);
 
-                        connect_to(pid, pport, phostname);
+                        int peer = 0;
+                        for (const auto &[pid, pport, phostname] : config.peers) {
+                                if (peers_up[peer] != pid)
+                                        continue;
 
-                        if (++peer == n_peers_up)
-                                break;
+                                // TODO: check that the PID isn't already in peers map
+                                //  not sure if this could be a problem, but make sure not
+                                //  to check this->peers.contains(pid) since that will lookup
+                                //  the socket file descriptor. Checking for pid is O(n).
+                                connect_to(pid, pport, phostname);
+
+                                if (++peer == n_peers_up)
+                                        break;
+                        }
+
+                        delete[] peers_up;
                 }
-
-                delete[] peers_up;
         }
 
         auto poller = new std::jthread{polling_loop, this};
@@ -258,7 +269,9 @@ void paxos_node::send_peer_list(socket_t sock)
         auto npeers = static_cast<uint8_t>(peers_up.size());
 
         cs171_cfg::send_with_delay(sock, &npeers, sizeof npeers, 0);
-        cs171_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
+
+        if (npeers > 0)
+                cs171_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
 }
 
 void paxos_node::connect_to(node_id_t id, int peer_port, const std::string &peer_hostname)
