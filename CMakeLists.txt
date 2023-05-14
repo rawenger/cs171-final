@@ -6,7 +6,8 @@ set(CMAKE_CXX_COMPILER g++)
 
 set(EXECUTABLES cs171_final)
 
-add_executable(cs171_final main.cpp paxos_node.cpp blockchain.cpp)
+add_executable(cs171_final main.cpp paxos_node.cpp blockchain.cpp paxos_msg.cpp)
+add_executable(cerealtest cerealtest.cpp)
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/cereal/include")
 
 if (${CMAKE_HOST_APPLE})
@@ -21,7 +22,10 @@ if (${CMAKE_HOST_APPLE})
 endif()
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -O0")# -fsanitize=thread,undefined")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -O0")
+    if (${CMAKE_HOST_LINUX})
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread,undefined")
+    endif()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -O2")
 endif()

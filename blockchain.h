@@ -22,6 +22,11 @@ union transaction {
         uint16_t receiver;
     } __attribute__((packed));
     uint64_t bits : 48;
+
+    template <class Archive>
+    void serialize(Archive &ar)
+    { ar(amt, sender, receiver); }
+
 } __attribute__((packed));
 static_assert(sizeof(transaction) == 6);
 

@@ -51,15 +51,15 @@ namespace cs171_cfg {
             return static_cast<ssize_t>(length);
     }
 
-    using client_id_t = uint8_t;
+    using node_id_t = uint8_t;
     using socket_t = int;
     struct system_cfg {
         // <PID, port #, hostname>
-        using client_tuple = std::tuple<client_id_t, int, std::string>;
+        using client_tuple = std::tuple<node_id_t, int, std::string>;
         std::vector<client_tuple> peers;
         size_t n_peers;
         int my_port;
-        client_id_t arbitrator;
+        node_id_t arbitrator;
 
         system_cfg();
     };

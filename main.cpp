@@ -17,7 +17,6 @@
 #include <cassert>
 #include <forward_list>
 
-#include "peer_connection.h"
 #include "request.h"
 #include "debug.h"
 #include "sema_q.h"
@@ -29,13 +28,10 @@ using wait_t = std::chrono::seconds;
 
 using cmd_t = std::variant<request_t, exit_t, wait_t>;
 
-static client_id_t my_id;
+static node_id_t my_id;
 static std::string my_hostname;
 
 static cmd_t parse_cmd(std::string_view &&msg);
-
-static void build_connections(int serv_sock);
-static void connect_server(int serv_sock);
 
 // TODO: requires fmtlib 10.0, which has not been packaged by homebrew yet.
 //  but this speeds up compilation times by a bit since less templates.
@@ -64,7 +60,6 @@ int main(int argc, char **argv)
         cs171_cfg::system_cfg config{};
 
         paxos_node node{config, my_id, my_hostname};
-
 
         while (1) {
                 std::string in;

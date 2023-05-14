@@ -19,10 +19,13 @@
 #include <fcntl.h>
 
 #include <cassert>
+#include <cereal/archives/portable_binary.hpp>
 
 #include "paxos_node.h"
 #include "peer_connection.h"
 #include "cs171_cfg.h"
+#include "paxos_msg.h"
+
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 {
@@ -80,7 +83,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd).client_id);
-                                close(pfd.fd);
+//                                close(pfd.fd);
                                 me->pmut.lock();
                                 me->peers.erase(pfd.fd);
                                 me->pmut.unlock();
@@ -94,17 +97,18 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (!(pfd.revents & POLLIN))
                                 continue;
 
-                        /*
-                        peer_msg msg {};
-                        ssize_t status = recv(pfd.fd, &msg, sizeof msg, 0);
-                        if (status < 0) {
-                                perror("Unable to receive data from socket");
-                                break;
-                        }
-                        assert(status == sizeof msg);
+                        uint16_t msg_size;
+                        recv(pfd.fd, &msg_size, 2, 0);
+                        msg_size = ntohs(msg_size);
 
-                        me->handle_msg(msg, pfd.fd);
-                        */
+                        std::string contents;
+                        contents.reserve(msg_size);
+                        recv(pfd.fd, contents.data(), msg_size, 0);
+                        auto msg = paxos_msg::read_msg(contents);
+
+                        switch (msg.type) {
+                                // TODO
+                        }
                 }
         }
 }
@@ -124,7 +128,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
  *      - P2 recieves num_peers from P1
  *      - P2 receives peers_up from P1
  */
-paxos_node::paxos_node(const cs171_cfg::system_cfg &config, client_id_t my_id, std::string node_hostname)
+paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname)
 :       my_id(my_id),
         connection_arbitrator(config.arbitrator),
         my_hostname(std::move(node_hostname)),
@@ -217,7 +221,7 @@ void paxos_node::listen_connections()
                         continue;
                 }
 
-                client_id_t newid;
+                node_id_t newid;
                 recv(newsock, &newid, sizeof newid, 0);
 
                 DBG("Accepted incoming connection from PID {}\n", newid);
@@ -254,7 +258,7 @@ void paxos_node::send_peer_list(socket_t sock)
         cs171_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
 }
 
-void paxos_node::connect_to(client_id_t id, int peer_port, const std::string &peer_hostname)
+void paxos_node::connect_to(node_id_t id, int peer_port, const std::string &peer_hostname)
 {
         /* connect to client P<id> at <hostname>:<port> */
         socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
