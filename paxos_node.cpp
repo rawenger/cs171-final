@@ -82,11 +82,15 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                 std::erase_if(client_fds, [me] (const pollfd &pfd) {
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 DBG("Peer P{} has been disconnected\n",
-                                    me->peers.at(pfd.fd).client_id);
+                                    me->peers.at(pfd.fd)->client_id);
                                 close(pfd.fd);
                                 me->pmut.lock();
                                 me->peers.erase(pfd.fd);
                                 me->pmut.unlock();
+                                if (me->leader && me->leader->sock == pfd.fd) {
+                                        DBG("Leader is down!");
+                                        std::thread{&paxos_node::start_election, me}.detach();
+                                }
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
@@ -104,13 +108,92 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         std::string contents;
                         contents.resize(msg_size);
                         recv(pfd.fd, contents.data(), msg_size, 0);
-                        auto msg = paxos_msg::read_msg(contents);
-                        DBG("BREAKPOINT HERE");
-
-                        switch (msg.type) {
-                                // TODO
-                        }
+                        me->handle_msg(pfd.fd, paxos_msg::decode_msg(contents));
                 }
+        }
+}
+
+void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
+{
+        pmut.lock();
+        DBG("Received {} message from peer P{}\n",
+            paxos_msg::msg_types[m.type],
+            peers.at(sender)->client_id);
+        pmut.unlock();
+
+        switch (m.type) {
+                // TODO:  start everyone's ballot number at 1
+            case paxos_msg::PREPARE: {
+                /*
+                 * if (balnum && m.balnum > balnum) {
+                 *      balnum = m.balnum;
+                 *      send(PROMISE, {balnum, accept_bal, accept_val})
+                 * else {
+                 *      send(PROMISE, None)
+                 * }
+                 */
+                break;
+            }
+
+            case paxos_msg::PROMISE: {
+                assert(my_state == LEADER);
+                /* TODO: don't forget to timeout
+                 * ++responses;
+                 * promises.push_back(promise)
+                 * if (responses > NPEERS_IN_CONFIG_FILE / 2) {
+                 *      if (p.acceptval is None for all p in promises) {
+                 *              val2send = our_value;
+                 *      else {
+                 *              val2send = max_balnum(promises).value
+                 *      }
+                 *      schedule_accept_msg(balnum, val2send);
+                 * }
+                 */
+                break;
+            }
+
+            case paxos_msg::ACCEPT: {
+                /*
+                 * if (m.balnum > balnum) {
+                 *      acceptnum = m.balnum;
+                 *      acceptval = m.value;
+                 *      write(backupfile, "accepting m.value");
+                 *      send(ACCEPTED, balnum);
+                 * }
+                 */
+                break;
+            }
+
+            case paxos_msg::ACCEPTED: {
+                /*
+                 * ++accepts;
+                 * if (accepts > NPEERS_IN_CONFIG_FILE / 2) {
+                 *      send(DECIDE, our_value);
+                 *  }
+                 */
+                break;
+            }
+
+            case paxos_msg::DECIDE: {
+                bool success = blockchain::BLOCKCHAIN.transfer(m.dec);
+                if (success) {
+                        fmt::print("Success!");
+                } else {
+                        fmt::print("Insufficient balance");
+                }
+
+                /*
+                 * acceptval = None
+                 * balnum.depth += success;
+                 */
+                break;
+            }
+
+            case paxos_msg::IM_NEW:
+            case paxos_msg::HANDSHAKE_COMPLETE: {
+                assert(false);
+                break;
+            }
         }
 }
 
@@ -131,16 +214,15 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
  */
 paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname)
 :       my_id(my_id),
-        connection_arbitrator(config.arbitrator),
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port)
 {
         auto listener = new std::thread{&paxos_node::listen_connections, this};
         listener->detach();
 
-        if (my_id != connection_arbitrator) {
+        if (my_id != config.arbitrator) {
                 const auto &[id, port, hostname] = config.peers.front();
-                assert(id == connection_arbitrator);
+                assert(id == config.arbitrator);
                 auto arb_addr = hostname_lookup(hostname, port);
                 socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -148,7 +230,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                         perror("Unable to connect to arbitrator node");
                         exit(EXIT_FAILURE);
                 }
-                DBG("Connected to peer PID {}", connection_arbitrator);
+                DBG("Connected to peer PID {}", config.arbitrator);
 
                 if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
                         perror("Unable to send PID to connection arbitrator");
@@ -164,9 +246,8 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                         exit(EXIT_FAILURE);
                 }
 
-                pmut.lock();
-                peers.emplace(sock, peer_connection{sock, connection_arbitrator});
-                pmut.unlock();
+                set_leader(new_peer(sock, config.arbitrator));
+                my_state = ACCEPTOR;
 
                 if (n_peers_up > 0) {
                         auto *peers_up = new uint8_t[n_peers_up];
@@ -191,9 +272,10 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                                 if (++peer == n_peers_up)
                                         break;
                         }
-
                         delete[] peers_up;
                 }
+        } else {
+                my_state = LEADER;
         }
 
         auto poller = new std::jthread{polling_loop, this};
@@ -249,10 +331,7 @@ void paxos_node::listen_connections()
                         assert(action == paxos_msg::HANDSHAKE_COMPLETE);
                 }
 
-                pmut.lock();
-                peers.emplace(newsock, peer_connection{newsock, newid});
-                update_pfds.test_and_set();
-                pmut.unlock();
+                new_peer(newsock, newid);
         }
 }
 
@@ -262,7 +341,7 @@ void paxos_node::send_peer_list(socket_t sock)
         std::vector<uint8_t> peers_up{};
         pmut.lock();
         for (const auto &[_, peer] : peers) {
-                peers_up.push_back(peer.client_id);
+                peers_up.push_back(peer->client_id);
         }
         pmut.unlock();
 
@@ -295,10 +374,7 @@ void paxos_node::connect_to(node_id_t id, int peer_port, const std::string &peer
         cs171_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
                                    "Unable to send handshake to peer");
 
-        pmut.lock();
-        assert(!peers.contains(sock));
-        peers.emplace(sock, peer_connection{sock, id});
-        pmut.unlock();
+        new_peer(sock, id);
 
         DBG("Connected to peer PID {}\n", id);
 //        say(this, "Connected to peer ID 'P{}' on fd #{}\n", id, sock);
@@ -314,7 +390,7 @@ void paxos_node::broadcast(transaction t)
                         }
         };
 
-        auto bytes = paxos_msg::create_msg(msg);
+        auto bytes = paxos_msg::encode_msg(msg);
 
         for (const auto &[sock, _] : this->peers) {
                 cs171_cfg::send_with_delay(sock, bytes.c_str(), bytes.size(), 0,
@@ -322,4 +398,14 @@ void paxos_node::broadcast(transaction t)
         }
 }
 
+peer_connection *paxos_node::new_peer(socket_t sock, node_id_t id)
+{
+        auto connection = std::make_unique<peer_connection>(sock, id);
+        auto res = connection.get();
+        pmut.lock();
+        peers.emplace(sock, std::move(connection));
+        update_pfds.test_and_set();
+        pmut.unlock();
 
+        return res; //NOLINT
+}

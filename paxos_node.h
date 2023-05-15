@@ -22,13 +22,13 @@ struct peer_connection {
         : sock(sock), client_id(id)
         { }
 
-    peer_connection(peer_connection &&other) = default;
+    peer_connection(peer_connection &&other) = delete;
+    peer_connection &operator=(peer_connection &&other) = delete;
 
     peer_connection(const peer_connection &other) = delete;
     peer_connection &operator=(const peer_connection &other) = delete;
-    peer_connection &operator=(peer_connection &&other) = delete;
 
-//    ~peer_connection() { shutdown(sock, SHUT_RDWR); close(sock); }
+    ~peer_connection() { shutdown(sock, SHUT_RDWR); close(sock); }
 
 //    void send(timestamp_t time, decltype(peer_msg::type) type) const;
 
@@ -37,7 +37,11 @@ struct peer_connection {
 };
 
 class paxos_node {
+    using peer_ptr = std::unique_ptr<peer_connection>;
+
     enum NODE_STATE {
+            ACCEPTOR,
+            LEADER,
             /* acceptor, leader, etc */
     };
 
@@ -45,16 +49,28 @@ class paxos_node {
     static void polling_loop(std::stop_token stoken, paxos_node *me);
 
     std::recursive_mutex pmut;
-    std::map<socket_t, peer_connection> peers;
+    std::map<socket_t, peer_ptr> peers;
+    std::atomic_flag update_pfds{false};
+
     node_id_t my_id;
-    node_id_t connection_arbitrator;
     std::string my_hostname;
     int my_port;
-    std::atomic_flag update_pfds{false}; // no atomic we die like men (but actually we don't need one)
+    peer_connection *leader{nullptr};
+    NODE_STATE my_state;
 
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
     void connect_to(node_id_t id, int peer_port, const std::string &peer_hostname);
+
+    peer_connection *new_peer(socket_t sock, node_id_t id);
+
+    void handle_msg(socket_t sender, paxos_msg::msg &&m);
+
+    void set_leader(peer_connection *new_leader)
+      { leader = new_leader; }
+
+    void start_election()
+      { leader = nullptr; }
 
 public:
 

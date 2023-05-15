@@ -10,7 +10,7 @@
 
 #include "paxos_msg.h"
 
-std::string paxos_msg::create_msg(paxos_msg::msg m)
+std::string paxos_msg::encode_msg(paxos_msg::msg m)
 {
         std::stringstream ss;
         {
@@ -27,7 +27,7 @@ std::string paxos_msg::create_msg(paxos_msg::msg m)
         return std::move(res) + std::move(str);
 }
 
-paxos_msg::msg paxos_msg::read_msg(const std::string &data)
+paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
 {
         std::stringstream ss{data};
         paxos_msg::msg res{};
