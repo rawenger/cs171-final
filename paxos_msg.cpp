@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/optional.hpp>
 #include <cereal/types/tuple.hpp>
 #include <sstream>
 

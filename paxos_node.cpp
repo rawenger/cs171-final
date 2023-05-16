@@ -25,7 +25,7 @@
 #include "peer_connection.h"
 #include "cs171_cfg.h"
 #include "paxos_msg.h"
-
+#include "sema_q.h"
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 {
@@ -113,90 +113,6 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
         }
 }
 
-void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
-{
-        pmut.lock();
-        DBG("Received {} message from peer P{}\n",
-            paxos_msg::msg_types[m.type],
-            peers.at(sender)->client_id);
-        pmut.unlock();
-
-        switch (m.type) {
-                // TODO:  start everyone's ballot number at 1
-            case paxos_msg::PREPARE: {
-                /*
-                 * if (balnum && m.balnum > balnum) {
-                 *      balnum = m.balnum;
-                 *      send(PROMISE, {balnum, accept_bal, accept_val})
-                 * else {
-                 *      send(PROMISE, None)
-                 * }
-                 */
-                break;
-            }
-
-            case paxos_msg::PROMISE: {
-                assert(my_state == LEADER);
-                /* TODO: don't forget to timeout
-                 * ++responses;
-                 * promises.push_back(promise)
-                 * if (responses > NPEERS_IN_CONFIG_FILE / 2) {
-                 *      if (p.acceptval is None for all p in promises) {
-                 *              val2send = our_value;
-                 *      else {
-                 *              val2send = max_balnum(promises).value
-                 *      }
-                 *      schedule_accept_msg(balnum, val2send);
-                 * }
-                 */
-                break;
-            }
-
-            case paxos_msg::ACCEPT: {
-                /*
-                 * if (m.balnum > balnum) {
-                 *      acceptnum = m.balnum;
-                 *      acceptval = m.value;
-                 *      write(backupfile, "accepting m.value");
-                 *      send(ACCEPTED, balnum);
-                 * }
-                 */
-                break;
-            }
-
-            case paxos_msg::ACCEPTED: {
-                /*
-                 * ++accepts;
-                 * if (accepts > NPEERS_IN_CONFIG_FILE / 2) {
-                 *      send(DECIDE, our_value);
-                 *  }
-                 */
-                break;
-            }
-
-            case paxos_msg::DECIDE: {
-                bool success = blockchain::BLOCKCHAIN.transfer(m.dec);
-                if (success) {
-                        fmt::print("Success!");
-                } else {
-                        fmt::print("Insufficient balance");
-                }
-
-                /*
-                 * acceptval = None
-                 * balnum.depth += success;
-                 */
-                break;
-            }
-
-            case paxos_msg::IM_NEW:
-            case paxos_msg::HANDSHAKE_COMPLETE: {
-                assert(false);
-                break;
-            }
-        }
-}
-
 /*
  * The way this works is one of the nodes (typically the one with the lowest PID)
  * will be delegated as the "connection arbitrator"--the one whom everyone else
@@ -217,6 +133,10 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port)
 {
+        auto origin = std::make_tuple(0, my_id, 0);
+        my_ballot_num = origin;
+        latest_accepted_ballot = origin;
+
         auto listener = new std::thread{&paxos_node::listen_connections, this};
         listener->detach();
 
@@ -280,6 +200,183 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
         auto poller = new std::jthread{polling_loop, this};
         poller->detach();
+}
+
+void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
+{
+       /*
+        * if (balnum && m.balnum > balnum) {
+        *      balnum = m.balnum;
+        *      send(PROMISE, {balnum, accept_bal, accept_val})
+        * else {
+        *      send(PROMISE, None)
+        * }
+        */
+
+        // If the proposal's ballot number is later than the one we've most recently accepted,
+        // promise the proposer we will accept no earlier ballot's than theirs by fast-forwarding
+        // our ballot number.
+
+        if (proposal > my_ballot_num) {
+                const auto time_of_proposal = std::get<0>(proposal);
+                std::get<0>(my_ballot_num) = time_of_proposal;
+
+                paxos_msg::promise_msg promise = {
+                        .balnum = proposal,
+                        .acceptnum = latest_accepted_ballot,
+                        .acceptval = latest_accepted_value,
+                };
+
+                paxos_msg::msg msg = {
+                        .type = paxos_msg::MSG_TYPE::PROMISE,
+                        .prom = promise,
+                };
+
+                auto payload = paxos_msg::encode_msg(msg);
+
+                cs171_cfg::send_with_delay(
+                        proposer,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked on a promise."
+                );
+        }
+}
+
+void paxos_node::receive_promises(const TimePoint &timeout_time)
+{
+        /* TODO: don't forget to timeout
+         * ++responses;
+         * promises.push_back(promise)
+         * if (responses > NPEERS_IN_CONFIG_FILE / 2) {
+         *      if (p.acceptval is None for all p in promises) {
+         *              val2send = our_value;
+         *      else {
+         *              val2send = max_balnum(promises).value
+         *      }
+         *      schedule_accept_msg(balnum, val2send);
+         * }
+         */
+
+        size_t n_responses = 0;
+        constexpr size_t majority = 3 / 2 + 1; // TODO
+        std::vector<paxos_msg::promise_msg> promises {};
+
+        while (n_responses < majority) {
+                auto maybe_prom = prom_q.try_pop_until(timeout_time);
+
+                if (!maybe_prom) {
+                        fmt::print("Timed out waiting for promises");
+                        return;
+                }
+
+                // Only if the node is promising to join our most recent ballot. Otherwise, it's
+                // an old promise.
+                if (my_ballot_num == maybe_prom->balnum) {
+                        promises.push_back(std::move(*maybe_prom));
+                        ++n_responses;
+                }
+        }
+
+        bool all_bottom = true;
+        std::vector<paxos_msg::promise_msg> promises_with_value;
+
+        for (const auto &promise : promises) {
+                if (promise.acceptval) {
+                        all_bottom = false;
+                        promises_with_value.push_back(promise);
+                }
+        }
+
+        paxos_msg::V chosen_value = proposed_val;
+
+        if (!all_bottom) {
+                // We have received at least one promise that is not bottom.
+                assert(promises_with_value.size() > 0);
+
+                auto maybe_accept_val = std::max_element(
+                        promises_with_value.cbegin(), promises_with_value.cend(),
+                        [](const paxos_msg::promise_msg &p1, const paxos_msg::promise_msg &p2) -> bool
+                                { return p1.balnum > p2.balnum; }
+                )->acceptval;
+
+                // This promise should not be bottom.
+                assert(maybe_accept_val.has_value());
+
+                chosen_value = *maybe_accept_val;
+        }
+
+        // TODO
+        // schedule_accept_msg(balnum, val2send);
+}
+
+void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
+{
+        pmut.lock();
+        DBG("Received {} message from peer P{}\n",
+            paxos_msg::msg_types[m.type],
+            peers.at(sender)->client_id);
+        pmut.unlock();
+
+        switch (m.type) {
+                // TODO:  start everyone's ballot number at 1
+            case paxos_msg::PREPARE: {
+                receive_prepare(sender, m.prep);
+                break;
+            }
+
+            case paxos_msg::PROMISE: {
+                assert(my_state == LEADER);
+                const TimePoint timeout_time = Clock::now() + std::chrono::seconds{5};
+                // only call this once
+                prom_q.push(m.prom);
+                //receive_promises(timeout_time);
+                break;
+            }
+
+            case paxos_msg::ACCEPT: {
+                /*
+                 * if (m.balnum > balnum) {
+                 *      acceptnum = m.balnum;
+                 *      acceptval = m.value;
+                 *      write(backupfile, "accepting m.value");
+                 *      send(ACCEPTED, balnum);
+                 * }
+                 */
+                break;
+            }
+
+            case paxos_msg::ACCEPTED: {
+                /*
+                 * ++accepts;
+                 * if (accepts > NPEERS_IN_CONFIG_FILE / 2) {
+                 *      send(DECIDE, our_value);
+                 *  }
+                 */
+                break;
+            }
+
+            case paxos_msg::DECIDE: {
+                bool success = blockchain::BLOCKCHAIN.transfer(m.dec);
+                if (success) {
+                        fmt::print("Success!");
+                } else {
+                        fmt::print("Insufficient balance");
+                }
+
+                /*
+                 * acceptval = None
+                 * balnum.depth += success;
+                 */
+                break;
+            }
+
+            case paxos_msg::IM_NEW:
+            case paxos_msg::HANDSHAKE_COMPLETE: {
+                assert(false);
+                break;
+            }
+        }
 }
 
 [[noreturn]]
@@ -394,7 +491,7 @@ void paxos_node::broadcast(transaction t)
 
         for (const auto &[sock, _] : this->peers) {
                 cs171_cfg::send_with_delay(sock, bytes.c_str(), bytes.size(), 0,
-                                           "NONONONO");
+                                           "Failed point-to-point of broadcast");
         }
 }
 

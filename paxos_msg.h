@@ -38,7 +38,10 @@ namespace paxos_msg {
         /* no additional data needs to be read */
     };
 
-    using ballot_num = std::tuple<size_t, uint8_t, size_t>;
+    using slot_number = size_t;
+    using proposal_number = size_t;
+    using process_label = uint8_t;
+    using ballot_num = std::tuple<proposal_number, process_label, slot_number>;
 
     using prepare_msg = ballot_num;
 //    using accept_msg = ballot_num; // also needs value
@@ -54,7 +57,7 @@ namespace paxos_msg {
         /* The proposal with the highest number less than n (balnum) that it has
          * accepted, if any.
          */
-        std::optional<ballot_num> acceptnum;
+        ballot_num acceptnum;
 
         std::optional<V> acceptval; // only if we accepted something already (this is the value that we accepted)
     };

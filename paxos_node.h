@@ -56,7 +56,17 @@ class paxos_node {
     std::string my_hostname;
     int my_port;
     peer_connection *leader{nullptr};
+    std::vector<paxos_msg::V> log;
+    size_t responses{0};
+
     NODE_STATE my_state;
+
+    paxos_msg::ballot_num my_ballot_num;
+    paxos_msg::ballot_num latest_accepted_ballot;
+    std::optional<paxos_msg::V> latest_accepted_value;
+
+    sema_q<paxos_msg::promise_msg> prom_q {};
+    paxos_msg::V proposed_val; // last proposed value
 
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
@@ -71,6 +81,9 @@ class paxos_node {
 
     void start_election()
       { leader = nullptr; }
+
+    void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
+    void receive_promises(const TimePoint &promise);
 
 public:
 

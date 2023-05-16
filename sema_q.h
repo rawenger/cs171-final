@@ -3,8 +3,14 @@
 //
 
 #pragma once
-#include <semaphore>
+
+#include <chrono>
 #include <cstdint>
+#include <semaphore>
+#include <optional>
+
+using Clock = std::chrono::high_resolution_clock;
+using TimePoint = std::chrono::time_point<Clock>;
 
 /** Semaphore-controlled FIFO queue with exactly one producer and one consumer.
  * Use a size large enough that the queue will *never* become full!
@@ -13,8 +19,8 @@
  * Also, the size has to be a power of 2.
  */
 template <typename T, size_t bufsize=128>
-        requires std::is_trivially_copyable_v<T>
-                && ((bufsize & (bufsize - 1)) == 0)
+        //requires std::is_trivially_copyable_v<T>
+        //        && ((bufsize & (bufsize - 1)) == 0)
 class sema_q {
     size_t head{0};
     size_t tail{0};
@@ -39,5 +45,17 @@ public:
         head = (head + 1) & (bufsize - 1);
         return buf[hd];
     }
+
+    std::optional<T> try_pop_until(const TimePoint& abs_time)
+    {
+        if (size.try_acquire_until(abs_time)) {
+            size_t hd = head;
+            head = (head + 1) & (bufsize - 1);
+            return {buf[hd]};
+        } else {
+            return {};
+        }
+    }
+
 };
 
