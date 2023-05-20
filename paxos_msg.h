@@ -98,4 +98,6 @@ namespace paxos_msg {
 
     std::string encode_msg(msg m);
     msg decode_msg(const std::string &data);
-};
+
+    bool operator<(const ballot_num &b1, const ballot_num &b2);
+}

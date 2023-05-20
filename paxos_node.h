@@ -61,9 +61,9 @@ class paxos_node {
 
     NODE_STATE my_state;
 
-    paxos_msg::ballot_num my_ballot_num;
-    paxos_msg::ballot_num latest_accepted_ballot;
-    std::optional<paxos_msg::V> latest_accepted_value;
+    paxos_msg::ballot_num balnum;
+    std::vector<paxos_msg::ballot_num> accept_bals;
+    std::vector<std::optional<paxos_msg::V>> accept_vals; // mmap this?
 
     sema_q<paxos_msg::promise_msg> prom_q {};
     paxos_msg::V proposed_val; // last proposed value
@@ -84,6 +84,9 @@ class paxos_node {
 
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
     void receive_promises(const TimePoint &promise);
+
+    paxos_msg::ballot_num &balslot(size_t slot);
+    std::optional<paxos_msg::V> &valslot(size_t slot);
 
 public:
 

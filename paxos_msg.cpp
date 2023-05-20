@@ -39,3 +39,11 @@ paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
 
         return res;
 }
+
+//bool operator<(const paxos_msg::ballot_num &b1, const paxos_msg::ballot_num &b2)
+//{
+//        const auto &[pn1, id1, slot1] = b1;
+//        const auto &[pn2, id2, slot2] = b2;
+//
+//        return (slot1 > slot2)
+//}
