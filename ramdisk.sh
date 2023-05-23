@@ -2,11 +2,12 @@
 
 set -e
 
+MOUNT_DIR="./ramfs"
+mkdir -p "$MOUNT_DIR"
 MOUNT_DIR="$(realpath ./ramfs)"
 
 [ "$(mount | grep -o "$MOUNT_DIR")" = "$MOUNT_DIR" ] && exit 0
 
-mkdir -p "$MOUNT_DIR"
 
 if [ "$(uname)" = "Linux" ]; then
   sudo mount -t ramfs -o size=1g ramfs "$MOUNT_DIR"  # size parameter seems to be ignored here?
