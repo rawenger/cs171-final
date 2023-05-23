@@ -11,7 +11,9 @@
 #include "blockchain.h"
 #include "request.h"
 #include "sema_q.h"
+#include "fs_buf.h"
 #include "cs171_cfg.h"
+
 
 using cs171_cfg::socket_t, cs171_cfg::node_id_t;
 
@@ -62,8 +64,8 @@ class paxos_node {
     NODE_STATE my_state;
 
     paxos_msg::ballot_num balnum;
-    std::vector<paxos_msg::ballot_num> accept_bals;
-    std::vector<std::optional<paxos_msg::V>> accept_vals; // mmap this?
+    fs_buf<paxos_msg::ballot_num> accept_bals;
+    fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
     sema_q<paxos_msg::promise_msg> prom_q {};
     paxos_msg::V proposed_val; // last proposed value
@@ -84,9 +86,6 @@ class paxos_node {
 
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
     void receive_promises(const TimePoint &promise);
-
-    paxos_msg::ballot_num &balslot(size_t slot);
-    std::optional<paxos_msg::V> &valslot(size_t slot);
 
 public:
 

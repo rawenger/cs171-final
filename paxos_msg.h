@@ -38,10 +38,56 @@ namespace paxos_msg {
         /* no additional data needs to be read */
     };
 
-    using slot_number = size_t;
-    using proposal_number = size_t;
-    using process_label = uint8_t;
-    using ballot_num = std::tuple<proposal_number, process_label, slot_number>;
+    struct ballot_num {
+        size_t number;
+        uint8_t node_pid;
+        size_t slot_number;
+
+        ballot_num(size_t number, uint8_t nodePid, size_t slotNumber)
+        : number(number), node_pid(nodePid), slot_number(slotNumber)
+        { }
+
+        ballot_num() = default;
+
+            template <class Archive>
+        void serialize(Archive &ar)
+        { ar(number), ar(node_pid), ar(slot_number); }
+
+        // TODO: relational operators IDE-generated....look over these later
+        bool operator==(const ballot_num &rhs) const {
+                return number == rhs.number &&
+                       node_pid == rhs.node_pid &&
+                       slot_number == rhs.slot_number;
+        }
+
+        bool operator<(const ballot_num &rhs) const {
+                if (number < rhs.number)
+                        return true;
+                if (rhs.number < number)
+                        return false;
+                if (node_pid < rhs.node_pid)
+                        return true;
+                if (rhs.node_pid < node_pid)
+                        return false;
+                return slot_number < rhs.slot_number;
+        }
+
+        bool operator!=(const ballot_num &rhs) const {
+                return !(rhs == *this);
+        }
+
+        bool operator>(const ballot_num &rhs) const {
+                return rhs < *this;
+        }
+
+        bool operator<=(const ballot_num &rhs) const {
+                return !(rhs < *this);
+        }
+
+        bool operator>=(const ballot_num &rhs) const {
+                return !(*this < rhs);
+        }
+    };
 
     using prepare_msg = ballot_num;
 //    using accept_msg = ballot_num; // also needs value
@@ -98,6 +144,4 @@ namespace paxos_msg {
 
     std::string encode_msg(msg m);
     msg decode_msg(const std::string &data);
-
-    bool operator<(const ballot_num &b1, const ballot_num &b2);
 }

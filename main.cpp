@@ -22,6 +22,7 @@
 #include "sema_q.h"
 #include "cs171_cfg.h"
 #include "paxos_node.h"
+#include "fs_buf.h"
 
 struct exit_t {};
 using wait_t = std::chrono::seconds;
@@ -44,6 +45,17 @@ static cmd_t parse_cmd(std::string_view &&msg);
 //                               (uint16_t) req.tr.recv, (uint16_t) req.tr.amt));
 //}
 
+//struct test_serial {
+//        size_t sn;
+//        size_t pn;
+//        uint8_t plbl;
+//};
+//
+//std::string format_as(test_serial req)
+//{
+//        return fmt::format("{{{}, {}, {}}}", req.sn, req.pn, req.plbl);
+//}
+
 int main(int argc, char **argv)
 {
         if (argc < 2) {
@@ -56,6 +68,24 @@ int main(int argc, char **argv)
         else
                 my_id = atoi(argv[1]);
 
+        // fs_buf tests
+//        if (my_id == 1) {
+//                fs_buf<std::optional<test_serial>> test1 {1};
+//                test1[4] = {1,2,3};
+//                test1[2] = {4,5,6};
+//                test1[5] = {0,0,0};
+//                test1[100] = {7,8,9};
+//                test1[75] = {};
+//                test1[5000] = {34, 35, 36};
+//                std::this_thread::sleep_for(std::chrono::seconds{5}); // data will still be saved even if we ctrl-C here!
+//        } else {
+//                fs_buf<std::optional<test_serial>> test1 {1, true}; // initialize data from disk backup
+//                fmt::print("[2]: {}, [4]: {}, [5]: {}, [75]: {}, [100]: {}, [5000]: {}\n",
+//                           *test1[2], *test1[4], *test1[5], !!test1[75], *test1[100], *test1[5000]);
+//        }
+//        return 0;
+
+#if 1
         /* Constructing this object will open and parse the config.csv file */
         cs171_cfg::system_cfg config{};
 
@@ -101,7 +131,7 @@ int main(int argc, char **argv)
 //        reqs.push({.type = request_t::INVALID_REQUEST});
 
 //        socket_worker.join();
-
+#endif
         return 0;
 }
 

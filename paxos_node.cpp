@@ -2,7 +2,7 @@
 // Created by Ryan Wenger on 5/12/23.
 //
 
-#ifdef linux
+#ifdef __linux__
 #define _GNU_SOURCE
 #define SOCK_EVENT_CLOSE        POLLRDHUP
 #define SOCK_REVENT_CLOSE       POLLRDHUP
@@ -132,9 +132,11 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 :       my_id(my_id),
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port),
-        balnum({0, my_id, 0})
+        balnum(0, my_id, 0),
+        accept_bals{my_id}, // TODO: figure out when we want to tell these last 2 to restore from disk
+        accept_vals{my_id}
 {
-        balslot(1) = balnum;
+        accept_bals[1] = balnum;
 
         auto listener = new std::thread{&paxos_node::listen_connections, this};
         listener->detach();
@@ -217,13 +219,13 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         // our ballot number.
 
         if (balnum < proposal) {
-                const auto time_of_proposal = std::get<0>(proposal);
-                std::get<0>(balnum) = time_of_proposal;
+                const auto time_of_proposal = proposal.number;
+                balnum.number = time_of_proposal;
 
                 paxos_msg::promise_msg promise = {
                         .balnum = proposal,
-                        .acceptnum = balslot(std::get<2>(proposal)),
-                        .acceptval = valslot(std::get<2>(proposal)),
+                        .acceptnum = accept_bals[proposal.slot_number],
+                        .acceptval = accept_vals[proposal.slot_number],
                 };
 
                 paxos_msg::msg msg = {
@@ -274,11 +276,11 @@ void paxos_node::receive_promises(const TimePoint &timeout_time)
                 if (balnum == maybe_prom->balnum) {
                         ++n_responses;
                         if (maybe_prom->acceptval)
-                                promises.push_back(std::move(*maybe_prom));
+                                promises.push_back(*maybe_prom);
                 }
         }
 
-        bool all_bottom = true;
+        bool all_bottom = true; // TODO @jackson?
 
         paxos_msg::V chosen_value = proposed_val;
 
@@ -497,23 +499,4 @@ peer_connection *paxos_node::new_peer(socket_t sock, node_id_t id)
         pmut.unlock();
 
         return res; //NOLINT
-}
-
-// NOTE: slot number begins at 1
-paxos_msg::ballot_num &paxos_node::balslot(size_t slot)
-{
-        if (accept_bals.size() < slot) {
-                accept_bals.reserve(slot);
-                for (size_t i = accept_bals.size() + 1; i <= slot; i++) {
-                        accept_bals.emplace_back(0, my_id, i);
-                }
-        }
-
-        return accept_bals[slot - 1];
-}
-
-std::optional<paxos_msg::V> &paxos_node::valslot(size_t slot)
-{
-        accept_vals.resize(slot);
-        return accept_vals[slot - 1];
 }
