@@ -205,22 +205,12 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
 {
-       /*
-        * if (balnum && m.balnum > balnum) {
-        *      balnum = m.balnum;
-        *      send(PROMISE, {balnum, accept_bal, accept_val})
-        * else {
-        *      send(PROMISE, None)
-        * }
-        */
-
         // If the proposal's ballot number is later than the one we've most recently accepted,
         // promise the proposer we will accept no earlier ballot's than theirs by fast-forwarding
-        // our ballot number.
+        // our ballot number to theirs.
 
         if (balnum < proposal) {
-                const auto time_of_proposal = proposal.number;
-                balnum.number = time_of_proposal;
+                balnum = proposal;
 
                 paxos_msg::promise_msg promise = {
                         .balnum = proposal,
@@ -275,22 +265,23 @@ void paxos_node::receive_promises(const TimePoint &timeout_time)
                 // an old promise.
                 if (balnum == maybe_prom->balnum) {
                         ++n_responses;
-                        if (maybe_prom->acceptval)
+                        if (maybe_prom->acceptval.has_value()) {
                                 promises.push_back(*maybe_prom);
+                        }
                 }
         }
 
-        bool all_bottom = true; // TODO @jackson?
+        bool all_bottom = promises.size() < 1;
 
         paxos_msg::V chosen_value = proposed_val;
 
-        if (!all_bottom) {
+        if (not all_bottom) {
                 // We have received at least one promise that is not bottom.
                 assert(!promises.empty());
 
                 auto maybe_accept_val = std::max_element(
                         promises.cbegin(), promises.cend(),
-                        [](const paxos_msg::promise_msg &p1, const paxos_msg::promise_msg &p2) -> bool
+                        [](const auto &p1, const auto &p2) -> bool
                                 { return p1.balnum > p2.balnum; }
                 )->acceptval;
 
