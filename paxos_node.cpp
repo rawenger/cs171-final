@@ -234,53 +234,49 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         }
 }
 
+void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
+{
+
+}
+
 void paxos_node::receive_promises(const TimePoint &timeout_time)
 {
-        /* TODO: don't forget to timeout
-         * ++responses;
-         * promises.push_back(promise)
-         * if (responses > NPEERS_IN_CONFIG_FILE / 2) {
-         *      if (p.acceptval is None for all p in promises) {
-         *              val2send = our_value;
-         *      else {
-         *              val2send = max_balnum(promises).value
-         *      }
-         *      schedule_accept_msg(balnum, val2send);
-         * }
-         */
-
         size_t n_responses = 0;
         constexpr size_t majority = 3 / 2; // TODO (note we auto-count ourself in the majority)
-        std::vector<paxos_msg::promise_msg> promises {};
+
+        std::vector<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> promises;
+        std::vector<paxos_msg::promise_msg> non_bottom_promises;
 
         while (n_responses < majority) {
                 auto maybe_prom = prom_q.try_pop_until(timeout_time);
 
-                if (!maybe_prom) {
+                if (not maybe_prom.has_value()) {
                         fmt::print("Timed out waiting for promises");
                         return;
                 }
 
+                const auto &[sender, prom] = maybe_prom.value();
+
                 // Only if the node is promising to join our most recent ballot. Otherwise, it's
                 // an old promise.
-                if (balnum == maybe_prom->balnum) {
-                        ++n_responses;
-                        if (maybe_prom->acceptval.has_value()) {
-                                promises.push_back(*maybe_prom);
+                if (balnum == prom.balnum) {
+                        n_responses += 1;
+                        promises.push_back(std::make_tuple(sender, prom));
+                        if (prom.acceptval.has_value()) {
+                                non_bottom_promises.push_back(prom);
                         }
                 }
         }
 
-        bool all_bottom = promises.size() < 1;
-
         paxos_msg::V chosen_value = proposed_val;
 
+        bool all_bottom = non_bottom_promises.size() < 1;
         if (not all_bottom) {
                 // We have received at least one promise that is not bottom.
-                assert(!promises.empty());
+                assert(not non_bottom_promises.empty());
 
                 auto maybe_accept_val = std::max_element(
-                        promises.cbegin(), promises.cend(),
+                        non_bottom_promises.cbegin(), non_bottom_promises.cend(),
                         [](const auto &p1, const auto &p2) -> bool
                                 { return p1.balnum > p2.balnum; }
                 )->acceptval;
@@ -288,11 +284,29 @@ void paxos_node::receive_promises(const TimePoint &timeout_time)
                 // This promise should not be bottom.
                 assert(maybe_accept_val.has_value());
 
-                chosen_value = *maybe_accept_val;
+                chosen_value = maybe_accept_val.value();
         }
 
-        // TODO
-        // schedule_accept_msg(balnum, val2send);
+        for (const auto &[sender, prom] : promises) {
+                paxos_msg::accept_msg accept = {
+                        .balnum = prom.balnum,
+                        .value = chosen_value,
+                };
+
+                paxos_msg::msg msg = {
+                        .type = paxos_msg::MSG_TYPE::ACCEPT,
+                        .acc = accept,
+                };
+
+                auto payload = paxos_msg::encode_msg(msg);
+
+                cs171_cfg::send_with_delay(
+                        sender,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked while replying to a promise."
+                );
+        }
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -313,9 +327,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             case paxos_msg::PROMISE: {
                 assert(my_state == LEADER);
                 const TimePoint timeout_time = Clock::now() + std::chrono::seconds{5};
-                // only call this once
-                prom_q.push(m.prom);
-                //receive_promises(timeout_time);
+                prom_q.push(std::make_tuple(sender, m.prom));
                 break;
             }
 

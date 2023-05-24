@@ -67,7 +67,7 @@ class paxos_node {
     fs_buf<paxos_msg::ballot_num> accept_bals;
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
-    sema_q<paxos_msg::promise_msg> prom_q {};
+    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
     paxos_msg::V proposed_val; // last proposed value
 
     [[noreturn]] void listen_connections();
@@ -85,6 +85,8 @@ class paxos_node {
       { leader = nullptr; }
 
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
+    void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept);
+
     void receive_promises(const TimePoint &promise);
 
 public:
