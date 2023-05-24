@@ -147,7 +147,7 @@ cs171_cfg::system_cfg::system_cfg()
         }
 
         n_peers = 0;
-        arbitrator = -1UL; // NOLINT
+        arbitrator = -1;
 
         while (!in.eof()) {
                 if (in.peek() == '#') {
