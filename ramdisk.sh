@@ -4,7 +4,7 @@ set -e
 
 MOUNT_DIR="./ramfs"
 mkdir -p "$MOUNT_DIR"
-MOUNT_DIR="$(realpath ./ramfs)"
+MOUNT_DIR="$(realpath "$MOUNT_DIR")"
 
 [ "$(mount | grep -o "$MOUNT_DIR")" = "$MOUNT_DIR" ] && exit 0
 
