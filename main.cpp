@@ -115,8 +115,8 @@ int main(int argc, char **argv)
                 }
 
                 // LOCK LAMPORT MUTEX
-                transaction tr{ req.tr.amt, my_id, req.tr.recv };
-                node.broadcast(tr);
+                // transaction tr{ req.tr.amt, my_id, req.tr.recv };
+                // node.broadcast(tr);
 //                uint8_t response;
                 // UNLOCK LAMPORT MUTEX
 //                if (response)

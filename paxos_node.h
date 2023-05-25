@@ -68,6 +68,8 @@ class paxos_node {
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
+    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> accepted_q {};
+
     paxos_msg::V proposed_val; // last proposed value
 
     [[noreturn]] void listen_connections();
@@ -87,12 +89,11 @@ class paxos_node {
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
     void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept);
 
-    void receive_promises(const TimePoint &promise);
+    void receive_promises(const TimePoint &timeout_time);
+    void receive_accepteds(const TimePoint &timeout_time);
 
 public:
 
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
-
-    void broadcast(transaction t);
 };
 
