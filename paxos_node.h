@@ -41,10 +41,12 @@ struct peer_connection {
 class paxos_node {
     using peer_ptr = std::unique_ptr<peer_connection>;
 
+    // Every node is always an acceptor.
     enum NODE_STATE {
-            ACCEPTOR,
-            LEADER,
-            /* acceptor, leader, etc */
+            PREPARER, // Consists of PREPARE and PROMISE messages. (Phase  I)
+            PROPOSER, // Consits of ACCEPT and ACCEPTED messages.  (Phase II)
+            LISTENER, // Consists of DECIDE messages.
+            FOLLOWER, // Not a proposer.
     };
 
     static constexpr int MAX_PEERS = 100;
@@ -53,24 +55,26 @@ class paxos_node {
     std::recursive_mutex pmut;
     std::map<socket_t, peer_ptr> peers;
     std::atomic_flag update_pfds{false};
+    size_t n_peers;
 
     node_id_t my_id;
     std::string my_hostname;
     int my_port;
+
     peer_connection *leader{nullptr};
-    std::vector<paxos_msg::V> log;
-    size_t responses{0};
 
     NODE_STATE my_state;
 
     paxos_msg::ballot_num balnum;
+    std::vector<paxos_msg::V> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
-    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
-    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> accepted_q {};
+    std::vector<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> promises;
+    std::vector<paxos_msg::promise_msg> promises_with_value;
+    std::vector<paxos_msg::accepted_msg> accepteds;
 
-    paxos_msg::V proposed_val; // last proposed value
+    std::optional<paxos_msg::V> proposed_val; // What value has the client proposed?
 
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
@@ -87,10 +91,10 @@ class paxos_node {
       { leader = nullptr; }
 
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
+    void receive_promise(cs171_cfg::socket_t sender, const paxos_msg::promise_msg &promise);
     void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept);
-
-    void receive_promises(const TimePoint &timeout_time);
-    void receive_accepteds(const TimePoint &timeout_time);
+    void receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted);
+    void receive_decide(const paxos_msg::decide_msg &decision);
 
 public:
 

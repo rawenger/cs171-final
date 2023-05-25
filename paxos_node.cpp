@@ -76,6 +76,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                 }
 
                 if (n_events == 0)
+                        // TODO: Timeout.
                         continue;
 
                 // remove peers who've closed their connection
@@ -132,6 +133,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 :       my_id(my_id),
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port),
+        n_peers{config.n_peers},
         balnum(0, my_id, 0),
         accept_bals{my_id}, // TODO: figure out when we want to tell these last 2 to restore from disk
         accept_vals{my_id}
@@ -168,7 +170,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                 }
 
                 set_leader(new_peer(sock, config.arbitrator));
-                my_state = ACCEPTOR;
+                my_state = FOLLOWER;
 
                 if (n_peers_up > 0) {
                         auto *peers_up = new uint8_t[n_peers_up];
@@ -196,7 +198,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                         delete[] peers_up;
                 }
         } else {
-                my_state = LEADER;
+                my_state = PREPARER;
         }
 
         auto poller = new std::jthread{polling_loop, this};
@@ -258,42 +260,30 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
         }
 }
 
-void paxos_node::receive_promises(const TimePoint &timeout_time)
+void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::promise_msg &promise)
 {
-        size_t n_responses = 0;
-        constexpr size_t majority = 3 / 2; // TODO (note we auto-count ourself in the majority)
-
-        std::vector<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> promises;
-        std::vector<paxos_msg::promise_msg> non_bottom_promises;
-
-        while (n_responses < majority) {
-                auto maybe_prom = prom_q.try_pop_until(timeout_time);
-
-                if (not maybe_prom.has_value()) {
-                        fmt::print("Timed out waiting for promises.");
-                        return;
-                }
-
-                const auto &[sender, prom] = maybe_prom.value();
-
-                // Only if the node is promising to join our most recent ballot. Otherwise, it's
-                // an old promise.
-                if (balnum == prom.balnum) {
-                        n_responses += 1;
-                        promises.push_back(std::make_tuple(sender, prom));
-                        if (prom.acceptval.has_value()) {
-                                non_bottom_promises.push_back(prom);
-                        }
+        // Only if the node is promising to join the ballot we've most recently proposed.
+        if (balnum == promise.balnum) {
+                promises.push_back(std::make_tuple(sender, promise));
+                if (promise.acceptval.has_value()) {
+                        promises_with_value.push_back(promise);
                 }
         }
 
-        bool all_bottom = non_bottom_promises.size() < 1;
+        size_t peers_for_majority = n_peers / 2;
+
+        if (not (promises.size() > peers_for_majority)) {
+                return;
+        }
+
+        bool all_bottom = promises_with_value.size() < 1;
+
         if (not all_bottom) {
                 // We have received at least one promise that is not bottom.
-                assert(not non_bottom_promises.empty());
+                assert(not promises.empty());
 
                 auto maybe_accept_val = std::max_element(
-                        non_bottom_promises.cbegin(), non_bottom_promises.cend(),
+                        promises_with_value.cbegin(), promises_with_value.cend(),
                         [](const auto &p1, const auto &p2) -> bool
                                 { return p1.balnum > p2.balnum; }
                 )->acceptval;
@@ -301,15 +291,15 @@ void paxos_node::receive_promises(const TimePoint &timeout_time)
                 // This promise should not be bottom.
                 assert(maybe_accept_val.has_value());
 
-                // TODO: Lock this! Is there a better way? Give this as a parameter, and when the
-                // thread returns bind it?
+                // TODO: Lock this! Is there a better way?
                 proposed_val = maybe_accept_val.value();
         }
 
+        assert(proposed_val.has_value());
         for (const auto &[sender, prom] : promises) {
                 paxos_msg::accept_msg accept = {
                         .balnum = prom.balnum,
-                        .value = proposed_val,
+                        .value = proposed_val.value(),
                 };
 
                 paxos_msg::msg msg = {
@@ -326,32 +316,26 @@ void paxos_node::receive_promises(const TimePoint &timeout_time)
                         "Choked on a ACCEPT message."
                 );
         }
+
+        my_state = PROPOSER;
 }
 
-void paxos_node::receive_accepteds(const TimePoint &timeout_time)
+void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted)
 {
-
-        size_t n_responses = 0;
-        constexpr size_t majority = 3 / 2; // TODO (note we auto-count ourself in the majority)
-
-        while (n_responses < majority) {
-                auto maybe_accepted = accepted_q.try_pop_until(timeout_time);
-
-                if (not maybe_accepted.has_value()) {
-                        fmt::print("Timed out waiting for our accepts to be accepted.");
-                        return;
-                }
-
-                const auto &[sender, accepted] = maybe_accepted.value();
-
-                // Only if the node is promising to join our most recent ballot. Otherwise, it's
-                // an old reply to our accept message.
-                if (balnum == accepted) {
-                        n_responses += 1;
-                }
+        // Only if the node is promising to join our most recent ballot. Otherwise, it's
+        // an old reply to our accept message.
+        if (balnum == accepted) {
+                accepteds.push_back(accepted);
         }
 
-        paxos_msg::decide_msg decide = proposed_val;
+        size_t peers_for_majority = n_peers / 2;
+
+        if (not (accepteds.size() > peers_for_majority)) {
+                return;
+        }
+
+        assert(proposed_val.has_value());
+        paxos_msg::decide_msg decide = proposed_val.value();
 
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::DECIDE,
@@ -372,6 +356,35 @@ void paxos_node::receive_accepteds(const TimePoint &timeout_time)
         }
 
         pmut.unlock();
+
+        my_state = LISTENER;
+}
+
+void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
+{
+        // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
+        // recover from.
+
+        bool success = blockchain::BLOCKCHAIN.transfer(decision);
+
+        if (success) {
+                fmt::print("Success!");
+        } else {
+                fmt::print("Insufficient balance");
+        }
+
+        // Increase the slot number of our ballot number, which corresponds to the depth of
+        // our blockchain. We have decided this slot number, and so our next proposal should
+        // try to gain concensus on the next slot.
+        balnum.slot_number += 1;
+
+        // Discard messages absorbed by this iteration of the concensus algorithm.
+        promises.clear();
+        promises_with_value.clear();
+        accepteds.clear();
+
+        // TODO: Skip Phase I.
+        my_state = PROPOSER;
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -389,9 +402,9 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::PROMISE: {
-                assert(my_state == LEADER);
-                // const TimePoint timeout_time = Clock::now() + std::chrono::seconds{5};
-                prom_q.push(std::make_tuple(sender, m.prom));
+                if (my_state == PREPARER) {
+                        receive_promise(sender, m.prom);
+                }
                 break;
             }
 
@@ -401,24 +414,16 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::ACCEPTED: {
-                accepted_q.push(std::make_tuple(sender, m.accd));
+                if (my_state == PROPOSER) {
+                        receive_accepted(sender, m.accd);
+                }
                 break;
             }
 
             case paxos_msg::DECIDE: {
-                bool success = blockchain::BLOCKCHAIN.transfer(m.dec);
-
-                if (success) {
-                        fmt::print("Success!");
-                } else {
-                        fmt::print("Insufficient balance");
+                if (my_state == LISTENER) {
+                        receive_decide(m.dec);
                 }
-
-                // Increase the slot number of our ballot number, which corresponds to the depth of
-                // our blockchain. We have decided this slot number, and so our next proposal should
-                // try to gain concensus on the next slot.
-                balnum.slot_number += 1;
-
                 break;
             }
 
