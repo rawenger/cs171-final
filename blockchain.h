@@ -8,7 +8,7 @@
 #include <mutex>
 #include <array>
 
-#include "request.h"
+#include <fmt/core.h>
 
 using u256 = std::array<uint8_t, 32>;
 

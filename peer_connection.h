@@ -15,7 +15,6 @@
 #include <barrier>
 
 #include "blockchain.h"
-#include "request.h"
 #include "sema_q.h"
 
 using client_id_t = uint8_t;
@@ -34,25 +33,25 @@ class lamport_mutex {
         } type;
     } __attribute__((packed));
 
-    struct request_event_t {
-        void issue();
+    // struct request_event_t {
+    //     void issue();
 
-        request_t req;
-        timestamp_t time;
-        client_id_t issuer;
-        std::unique_ptr<std::barrier<>> n_responses;
+    //     request_t req;
+    //     timestamp_t time;
+    //     client_id_t issuer;
+    //     std::unique_ptr<std::barrier<>> n_responses;
 
-        request_event_t(request_t req,
-                        timestamp_t time,
-                        client_id_t issuer,
-                        size_t responses)
-                : req(req), time(time), issuer(issuer),
-                  n_responses(std::make_unique<decltype(n_responses)::element_type>(responses+1))
-        { }
+    //     request_event_t(request_t req,
+    //                     timestamp_t time,
+    //                     client_id_t issuer,
+    //                     size_t responses)
+    //             : req(req), time(time), issuer(issuer),
+    //               n_responses(std::make_unique<decltype(n_responses)::element_type>(responses+1))
+    //     { }
 
-        bool operator<(const request_event_t &other) const
-          { return (time != other.time) ? (time < other.time) : (issuer < other.issuer); }
-    };
+    //     bool operator<(const request_event_t &other) const
+    //       { return (time != other.time) ? (time < other.time) : (issuer < other.issuer); }
+    // };
 
     struct peer_connection {
         peer_connection(socket_t sock, uint16_t id)
@@ -71,7 +70,7 @@ class lamport_mutex {
 
         socket_t sock {};
         uint16_t client_id {};
-        std::queue<const request_event_t *> waiting_response {}; // TODO: switch to lock-free queue impl
+        // std::queue<const request_event_t *> waiting_response {}; // TODO: switch to lock-free queue impl
     };
 
     socket_t accept_sock {-1};
@@ -80,7 +79,7 @@ class lamport_mutex {
     std::string my_hostname;
     client_id_t my_id {}; // client ID
 //    std::priority_queue<std::pair<timestamp_t, client_id_t>> lock_queue;
-    std::set<request_event_t> request_q;
+    // std::set<request_event_t> request_q;
 
 //    void handle_msg(lamport_mutex::peer_msg msg, socket_t insock);
 //    void queue_worker();

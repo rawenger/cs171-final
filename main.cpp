@@ -17,7 +17,6 @@
 #include <cassert>
 #include <forward_list>
 
-#include "request.h"
 #include "debug.h"
 #include "sema_q.h"
 #include "cs171_cfg.h"
@@ -26,6 +25,21 @@
 
 struct exit_t {};
 using wait_t = std::chrono::seconds;
+
+// TODO: Horrible legacy parse sum type.
+struct balance_req_t { uint16_t client; uint16_t unused; };
+struct request_t {
+    enum : uint8_t {
+        INVALID_REQUEST,
+        BAL_REQUEST,
+        TR_REQUEST
+    } type;
+
+    union {
+        balance_req_t bal;
+        transaction tr;
+    };
+};
 
 using cmd_t = std::variant<request_t, exit_t, wait_t>;
 
@@ -85,54 +99,43 @@ int main(int argc, char **argv)
 //        }
 //        return 0;
 
-#if 1
-        /* Constructing this object will open and parse the config.csv file */
-        cs171_cfg::system_cfg config{};
+        #if 1
+                /* Constructing this object will open and parse the config.csv file */
+                cs171_cfg::system_cfg config{};
 
-        paxos_node node{config, my_id, my_hostname};
+                paxos_node node{config, my_id, my_hostname};
 
-        while (1) {
-                std::string in;
-                std::cout << "> ";
-                std::getline(std::cin, in);
-                if (in.empty())
-                        continue;
+                while (1) {
+                        std::string in;
+                        std::cout << "> ";
+                        std::getline(std::cin, in);
+                        if (in.empty())
+                                continue;
 
-                cmd_t cmd = parse_cmd(in);
+                        cmd_t cmd = parse_cmd(in);
 
-                if (std::holds_alternative<exit_t>(cmd)) {
-                        break;
-                }
+                        if (std::holds_alternative<exit_t>(cmd)) {
+                                break;
+                        }
 
-                else if (std::holds_alternative<wait_t>(cmd)) {
-                        std::this_thread::sleep_for(std::get<wait_t>(cmd));
-                        continue;
-                }
+                        else if (std::holds_alternative<wait_t>(cmd)) {
+                                std::this_thread::sleep_for(std::get<wait_t>(cmd));
+                                continue;
+                        }
 
-                request_t req = std::get<request_t>(cmd);
-                if (req.type == request_t::INVALID_REQUEST) {
-                        continue;
-                }
+                        request_t req = std::get<request_t>(cmd);
+                        if (req.type == request_t::INVALID_REQUEST) {
+                                continue;
+                        }
 
-                // LOCK LAMPORT MUTEX
-                // transaction tr{ req.tr.amt, my_id, req.tr.recv };
-                // node.broadcast(tr);
-//                uint8_t response;
-                // UNLOCK LAMPORT MUTEX
-//                if (response)
-//                        fmt::print("[Server]: Success!\n");
-//                else
-//                        fmt::print("[Server]: Insufficient Balance\n");
-
-//                reqs.push(req);
+                        switch (req.type) {
+                                case request_t::TR_REQUEST:
+                                        node.prepare(req.tr);
+                                        break;
+                        }
+        #endif
+                return 0;
         }
-//        socket_worker.request_stop();
-
-//        reqs.push({.type = request_t::INVALID_REQUEST});
-
-//        socket_worker.join();
-#endif
-        return 0;
 }
 
 cs171_cfg::system_cfg::system_cfg()
@@ -246,14 +249,14 @@ static cmd_t parse_cmd(std::string_view &&msg)
                 res.type = request_t::INVALID_REQUEST;
                 return res;
         }
-        int dst;
+        uint16_t dst;
         auto result = std::from_chars(word->data(), word->data() + word->size(), dst);
         if (result.ec == std::errc::invalid_argument) {
                 fmt::print(stderr, "Malformed input.\n");
                 res.type = request_t::INVALID_REQUEST;
                 return res;
         }
-        res.tr.recv = dst; // equivalent to setting res.bal.client = dst
+        res.bal.client = dst; // equivalent to setting res.bal.client = dst
         res.bal.unused = 0xFFFF;
         if (res.type == request_t::BAL_REQUEST)
                 return res;
@@ -266,13 +269,17 @@ static cmd_t parse_cmd(std::string_view &&msg)
                 res.type = request_t::INVALID_REQUEST;
                 return res;
         }
-        int amt;
+        uint16_t amt;
         result = std::from_chars(word->data(), word->data() + word->size(), amt);
         if (result.ec == std::errc::invalid_argument) {
                 fmt::print(stderr, "Malformed input.\n");
                 res.type = request_t::INVALID_REQUEST;
                 return res;
         }
-        res.tr.amt = amt;
+        res.tr = {
+                .amt = amt,
+                .sender = my_id,
+                .receiver = dst,
+        };
         return res;
 }

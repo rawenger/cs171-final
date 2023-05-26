@@ -9,7 +9,6 @@
 //#include "peer_connection.h"
 #include "paxos_msg.h"
 #include "blockchain.h"
-#include "request.h"
 #include "sema_q.h"
 #include "fs_buf.h"
 #include "cs171_cfg.h"
@@ -97,7 +96,9 @@ class paxos_node {
     void receive_decide(const paxos_msg::decide_msg &decision);
 
 public:
+    auto say(const std::string &something) -> void;
 
+    void prepare(paxos_msg::V value);
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
 };
 

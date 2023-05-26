@@ -205,8 +205,40 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
         poller->detach();
 }
 
+void paxos_node::prepare(paxos_msg::V value)
+{
+        // Increment the sequence number of our ballot. This is a fresh proposal.
+        balnum.number += 1;
+
+        paxos_msg::prepare_msg prepare = balnum;
+
+        paxos_msg::msg msg = {
+                .type = paxos_msg::MSG_TYPE::PREPARE,
+                .prep = prepare,
+        };
+
+        auto payload = paxos_msg::encode_msg(msg);
+
+        pmut.lock();
+
+        for (const auto &[peer, _] : peers) {
+                cs171_cfg::send_with_delay(
+                        peer,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked on broadcasting a PREPARE message."
+                );
+        }
+
+        pmut.unlock();
+}
+
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
 {
+        say(fmt::format("Received PREPARE from P_{} with ballot ({}, {}, {}).",
+                proposal.node_pid,
+                proposal.number, proposal.node_pid, proposal.slot_number));
+
         // If the proposal's ballot number is later than the one we've most recently accepted,
         // promise the proposer we will accept no earlier ballot's than theirs by fast-forwarding
         // our ballot number to theirs.
@@ -236,32 +268,15 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         }
 }
 
-void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
-{
-        if (balnum < accept.balnum) {
-                accept_bals[accept.balnum.slot_number] = accept.balnum;
-                accept_vals[accept.balnum.slot_number] = accept.value;
-
-                paxos_msg::accepted_msg accepted = accept.balnum;
-
-                paxos_msg::msg msg = {
-                        .type = paxos_msg::MSG_TYPE::ACCEPTED,
-                        .accd = accepted,
-                };
-
-                auto payload = paxos_msg::encode_msg(msg);
-
-                cs171_cfg::send_with_delay(
-                        proposer,
-                        payload.c_str(), payload.size(),
-                        0,
-                        "Choked on an ACCEPTED message."
-                );
-        }
-}
-
 void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::promise_msg &promise)
 {
+        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+        say(fmt::format("Received PROMISE from P_{} to ballot ({}, {}, {}). Last accepted ballot is ({}, {}, {}) with value '{}'.",
+                promise.balnum.node_pid,
+                promise.balnum.number, promise.balnum.node_pid, promise.balnum.slot_number,
+                promise.acceptnum.number, promise.acceptnum.node_pid, promise.acceptnum.slot_number,
+                promise.acceptval.has_value() ? fmt::format("{} -{}-> {}", promise.acceptval.value().sender, promise.acceptval.value().amt, promise.acceptval.value().receiver) : "_|_"));
+
         // Only if the node is promising to join the ballot we've most recently proposed.
         if (balnum == promise.balnum) {
                 promises.push_back(std::make_tuple(sender, promise));
@@ -320,8 +335,42 @@ void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::pr
         my_state = PROPOSER;
 }
 
+void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
+{
+        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+        say(fmt::format("Received ACCEPT from P_{} with ballot ({}, {}, {}).",
+                accept.balnum.node_pid,
+                accept.balnum.number, accept.balnum.node_pid, accept.balnum.slot_number));
+
+        if (balnum < accept.balnum) {
+                accept_bals[accept.balnum.slot_number] = accept.balnum;
+                accept_vals[accept.balnum.slot_number] = accept.value;
+
+                paxos_msg::accepted_msg accepted = accept.balnum;
+
+                paxos_msg::msg msg = {
+                        .type = paxos_msg::MSG_TYPE::ACCEPTED,
+                        .accd = accepted,
+                };
+
+                auto payload = paxos_msg::encode_msg(msg);
+
+                cs171_cfg::send_with_delay(
+                        proposer,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked on an ACCEPTED message."
+                );
+        }
+}
+
 void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted)
 {
+        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+        say(fmt::format("Received ACCEPTED from P_{} with ballot ({}, {}, {}).",
+                accepted.node_pid,
+                accepted.number, accepted.node_pid, accepted.slot_number));
+
         // Only if the node is promising to join our most recent ballot. Otherwise, it's
         // an old reply to our accept message.
         if (balnum == accepted) {
@@ -362,8 +411,12 @@ void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::a
 
 void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
 {
+        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+        say(fmt::format("Received DECIDE with value {}.",
+                fmt::format("{} -{}-> {}", decision.sender, decision.amt, decision.receiver)));
+
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
-        // recover from.
+        // recover from. I don't believe this is part of the spec though.
 
         bool success = blockchain::BLOCKCHAIN.transfer(decision);
 
@@ -543,4 +596,26 @@ peer_connection *paxos_node::new_peer(socket_t sock, node_id_t id)
         pmut.unlock();
 
         return res; //NOLINT
+}
+
+auto paxos_node::say(const std::string &message) -> void
+{
+        std::string readable_state;
+        switch (my_state) {
+                case PREPARER:
+                        readable_state = "PREPARER";
+                        break;
+                case PROPOSER:
+                        readable_state = "PROPOSER";
+                        break;
+                case LISTENER:
+                        readable_state = "LISTENER";
+                        break;
+                case FOLLOWER:
+                        readable_state = "FOLLOWER";
+                        break;
+        }
+
+        fmt::print("P_{} ({}, {}, {}) <{}>: {}",
+                my_id, balnum.number, balnum.node_pid, balnum.slot_number, readable_state, message);
 }
