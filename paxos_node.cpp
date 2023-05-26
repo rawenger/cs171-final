@@ -134,7 +134,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port),
         n_peers{config.n_peers},
-        balnum(0, my_id, 0),
+        balnum(0, my_id, 1),
         accept_bals{my_id}, // TODO: figure out when we want to tell these last 2 to restore from disk
         accept_vals{my_id}
 {
@@ -205,10 +205,22 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
         poller->detach();
 }
 
-void paxos_node::prepare(paxos_msg::V value)
+void paxos_node::propose(paxos_msg::V value)
+{
+        if (my_state == PREPARER) {
+                broadcast_prepare(value);
+        } else {
+                broadcast_accept(value);
+        }
+}
+
+void paxos_node::broadcast_prepare(paxos_msg::V value)
 {
         // Increment the sequence number of our ballot. This is a fresh proposal.
         balnum.number += 1;
+
+        // Remember the value most recently proposed by the client.
+        proposed_val = value;
 
         paxos_msg::prepare_msg prepare = balnum;
 
@@ -222,6 +234,11 @@ void paxos_node::prepare(paxos_msg::V value)
         pmut.lock();
 
         for (const auto &[peer, _] : peers) {
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Broadcasting PREPARE with value {} to P_{}.",
+                        fmt::format("{} -${}-> {}", value.sender, value.amt, value.receiver),
+                        peer_id_of(peer)));
+
                 cs171_cfg::send_with_delay(
                         peer,
                         payload.c_str(), payload.size(),
@@ -233,17 +250,55 @@ void paxos_node::prepare(paxos_msg::V value)
         pmut.unlock();
 }
 
+void paxos_node::broadcast_accept(paxos_msg::V value)
+{
+        // Remember the value most recently proposed by the client.
+        proposed_val = value;
+
+        paxos_msg::accept_msg accept = {
+                .balnum = balnum,
+                .value = value,
+        };
+
+        paxos_msg::msg msg = {
+                .type = paxos_msg::MSG_TYPE::ACCEPT,
+                .acc = accept,
+        };
+
+        auto payload = paxos_msg::encode_msg(msg);
+
+        pmut.lock();
+
+        for (const auto &[peer, _] : peers) {
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Broadcasting ACCEPT to P_{} with ballot ({}, {}, {}).",
+                        peer_id_of(peer),
+                        accept.balnum.number, accept.balnum.node_pid, accept.balnum.slot_number));
+
+                cs171_cfg::send_with_delay(
+                        peer,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked on broadcasting a ACCEPT message."
+                );
+        }
+
+        pmut.unlock();
+}
+
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
 {
         say(fmt::format("Received PREPARE from P_{} with ballot ({}, {}, {}).",
-                proposal.node_pid,
+                peer_id_of(proposer),
                 proposal.number, proposal.node_pid, proposal.slot_number));
 
         // If the proposal's ballot number is later than the one we've most recently accepted,
         // promise the proposer we will accept no earlier ballot's than theirs by fast-forwarding
         // our ballot number to theirs.
 
-        if (balnum < proposal) {
+        // TODO: Not sure when it would be the case that the two are equal, even though we're
+        // defining the relation on less than or equal to.
+        if (balnum <= proposal) {
                 balnum = proposal;
 
                 paxos_msg::promise_msg promise = {
@@ -259,6 +314,13 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
 
                 auto payload = paxos_msg::encode_msg(msg);
 
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Sending PROMISE to P_{} with ballot ({}, {}, {}). Last accepted ballot is ({}, {}, {}) with value '{}'.",
+                        peer_id_of(proposer),
+                        promise.balnum.number, promise.balnum.node_pid, promise.balnum.slot_number,
+                        promise.acceptnum.number, promise.acceptnum.node_pid, promise.acceptnum.slot_number,
+                        promise.acceptval.has_value() ? fmt::format("{} -${}-> {}", promise.acceptval.value().sender, promise.acceptval.value().amt, promise.acceptval.value().receiver) : "bottom"));
+
                 cs171_cfg::send_with_delay(
                         proposer,
                         payload.c_str(), payload.size(),
@@ -272,10 +334,10 @@ void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::pr
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
         say(fmt::format("Received PROMISE from P_{} to ballot ({}, {}, {}). Last accepted ballot is ({}, {}, {}) with value '{}'.",
-                promise.balnum.node_pid,
+                peer_id_of(sender),
                 promise.balnum.number, promise.balnum.node_pid, promise.balnum.slot_number,
                 promise.acceptnum.number, promise.acceptnum.node_pid, promise.acceptnum.slot_number,
-                promise.acceptval.has_value() ? fmt::format("{} -{}-> {}", promise.acceptval.value().sender, promise.acceptval.value().amt, promise.acceptval.value().receiver) : "_|_"));
+                promise.acceptval.has_value() ? fmt::format("{} -${}-> {}", promise.acceptval.value().sender, promise.acceptval.value().amt, promise.acceptval.value().receiver) : "bottom"));
 
         // Only if the node is promising to join the ballot we've most recently proposed.
         if (balnum == promise.balnum) {
@@ -310,6 +372,8 @@ void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::pr
                 proposed_val = maybe_accept_val.value();
         }
 
+        my_state = LEARNER;
+
         assert(proposed_val.has_value());
         for (const auto &[sender, prom] : promises) {
                 paxos_msg::accept_msg accept = {
@@ -324,6 +388,11 @@ void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::pr
 
                 auto payload = paxos_msg::encode_msg(msg);
 
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Sending ACCEPT to P_{} with ballot ({}, {}, {}).",
+                        peer_id_of(sender),
+                        accept.balnum.number, accept.balnum.node_pid, accept.balnum.slot_number));
+
                 cs171_cfg::send_with_delay(
                         sender,
                         payload.c_str(), payload.size(),
@@ -331,18 +400,16 @@ void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::pr
                         "Choked on a ACCEPT message."
                 );
         }
-
-        my_state = PROPOSER;
 }
 
 void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
         say(fmt::format("Received ACCEPT from P_{} with ballot ({}, {}, {}).",
-                accept.balnum.node_pid,
+                peer_id_of(proposer),
                 accept.balnum.number, accept.balnum.node_pid, accept.balnum.slot_number));
 
-        if (balnum < accept.balnum) {
+        if (balnum <= accept.balnum) {
                 accept_bals[accept.balnum.slot_number] = accept.balnum;
                 accept_vals[accept.balnum.slot_number] = accept.value;
 
@@ -354,6 +421,11 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                 };
 
                 auto payload = paxos_msg::encode_msg(msg);
+
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Sending ACCEPTED to P_{} with ballot ({}, {}, {}).",
+                        peer_id_of(proposer),
+                        accepted.number, accepted.node_pid, accepted.slot_number));
 
                 cs171_cfg::send_with_delay(
                         proposer,
@@ -368,7 +440,7 @@ void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::a
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
         say(fmt::format("Received ACCEPTED from P_{} with ballot ({}, {}, {}).",
-                accepted.node_pid,
+                peer_id_of(sender),
                 accepted.number, accepted.node_pid, accepted.slot_number));
 
         // Only if the node is promising to join our most recent ballot. Otherwise, it's
@@ -384,18 +456,25 @@ void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::a
         }
 
         assert(proposed_val.has_value());
-        paxos_msg::decide_msg decide = proposed_val.value();
+        paxos_msg::decide_msg decision = proposed_val.value();
 
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::DECIDE,
-                .dec = decide,
+                .dec = decision,
         };
 
         auto payload = paxos_msg::encode_msg(msg);
 
         pmut.lock();
 
+        // TODO: Need a function to inspect all slots of the log.
+
         for (const auto &[peer, _] : peers) {
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Sending DECIDE to {} with value {}.",
+                        peer_id_of(peer),
+                        fmt::format("{} -${}-> {}", decision.sender, decision.amt, decision.receiver)));
+
                 cs171_cfg::send_with_delay(
                         peer,
                         payload.c_str(), payload.size(),
@@ -406,14 +485,24 @@ void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::a
 
         pmut.unlock();
 
-        my_state = LISTENER;
+        // TODO: Proposer must commit and write to log.
+        balnum.slot_number += 1;
+
+        // Discard messages absorbed by this iteration of the concensus algorithm.
+        promises.clear();
+        promises_with_value.clear();
+        accepteds.clear();
+        proposed_val.reset();
+
+        // TODO: Skip Phase I.
+        my_state = LEARNER;
 }
 
 void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
         say(fmt::format("Received DECIDE with value {}.",
-                fmt::format("{} -{}-> {}", decision.sender, decision.amt, decision.receiver)));
+                fmt::format("{} -${}-> {}", decision.sender, decision.amt, decision.receiver)));
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
         // recover from. I don't believe this is part of the spec though.
@@ -430,14 +519,6 @@ void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
         // our blockchain. We have decided this slot number, and so our next proposal should
         // try to gain concensus on the next slot.
         balnum.slot_number += 1;
-
-        // Discard messages absorbed by this iteration of the concensus algorithm.
-        promises.clear();
-        promises_with_value.clear();
-        accepteds.clear();
-
-        // TODO: Skip Phase I.
-        my_state = PROPOSER;
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -467,16 +548,14 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::ACCEPTED: {
-                if (my_state == PROPOSER) {
+                if (my_state == LEARNER) {
                         receive_accepted(sender, m.accd);
                 }
                 break;
             }
 
             case paxos_msg::DECIDE: {
-                if (my_state == LISTENER) {
-                        receive_decide(m.dec);
-                }
+                receive_decide(m.dec);
                 break;
             }
 
@@ -605,17 +684,23 @@ auto paxos_node::say(const std::string &message) -> void
                 case PREPARER:
                         readable_state = "PREPARER";
                         break;
-                case PROPOSER:
-                        readable_state = "PROPOSER";
-                        break;
-                case LISTENER:
-                        readable_state = "LISTENER";
+                case LEARNER:
+                        readable_state = "LEARNER";
                         break;
                 case FOLLOWER:
                         readable_state = "FOLLOWER";
                         break;
         }
 
-        fmt::print("P_{} ({}, {}, {}) <{}>: {}",
+        fmt::print("P_{} ({}, {}, {}) <{}>: {}\n",
                 my_id, balnum.number, balnum.node_pid, balnum.slot_number, readable_state, message);
+}
+
+
+cs171_cfg::node_id_t paxos_node::peer_id_of(cs171_cfg::socket_t peer)
+{
+        pmut.lock();
+        cs171_cfg::socket_t id = peers.at(peer)->client_id;
+        pmut.unlock();
+        return id;
 }

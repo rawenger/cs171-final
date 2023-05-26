@@ -43,8 +43,7 @@ class paxos_node {
     // Every node is always an acceptor.
     enum NODE_STATE {
             PREPARER, // Consists of PREPARE and PROMISE messages. (Phase  I)
-            PROPOSER, // Consits of ACCEPT and ACCEPTED messages.  (Phase II)
-            LISTENER, // Consists of DECIDE messages.
+            LEARNER, // Consits of ACCEPT and ACCEPTED messages.  (Phase II)
             FOLLOWER, // Not a proposer.
     };
 
@@ -95,10 +94,13 @@ class paxos_node {
     void receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted);
     void receive_decide(const paxos_msg::decide_msg &decision);
 
-public:
-    auto say(const std::string &something) -> void;
+    void broadcast_prepare(paxos_msg::V value);
+    void broadcast_accept(paxos_msg::V value);
 
-    void prepare(paxos_msg::V value);
+    auto say(const std::string &something) -> void;
+public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
+    void propose(paxos_msg::V value);
+    cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 };
 

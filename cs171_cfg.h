@@ -9,7 +9,7 @@ namespace cs171_cfg {
     using namespace std::chrono_literals;
     constexpr const char *SERVER_CFG = "server.csv";
     constexpr const char *CLIENT_CFG = "clients.csv";
-    constexpr auto NETWORK_DELAY = 0s;
+    constexpr auto NETWORK_DELAY = 3s;
 
     /** `err_msg` must be a string literal! */
     template <bool Async=true>

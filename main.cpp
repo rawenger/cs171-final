@@ -130,12 +130,11 @@ int main(int argc, char **argv)
 
                         switch (req.type) {
                                 case request_t::TR_REQUEST:
-                                        node.prepare(req.tr);
+                                        node.propose(req.tr);
                                         break;
                         }
+                }
         #endif
-                return 0;
-        }
 }
 
 cs171_cfg::system_cfg::system_cfg()
