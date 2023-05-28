@@ -11,11 +11,11 @@
 #include "debug.h"
 
 template<FS_BUF_T T>
-fs_buf<T>::fs_buf(uint8_t my_id, bool restore)
+fs_buf<T>::fs_buf(uint8_t my_id, const char *file_label)
 {
         namespace fs = std::filesystem;
-        auto filepath = fs::path{"./ramfs"} / std::to_string(my_id);
-        int oflags = O_RDWR | (restore ? 0 : O_CREAT);
+        auto filepath = fs::path{"./ramfs"} / (std::to_string(my_id) + file_label);
+        int oflags = O_RDWR | (fs::exists(filepath) ? 0 : O_CREAT);
         backing_fd = open(filepath.c_str(), oflags, S_IRUSR | S_IWUSR); // chmod 0600
 
         if (backing_fd < 0) {
@@ -36,10 +36,6 @@ fs_buf<T>::fs_buf(uint8_t my_id, bool restore)
          */
         off_t min_target_size = sysconf(_SC_PAGESIZE);
         bufsize = fs::file_size(filepath);
-
-        if (restore) {
-                DBG("Recovered {} bytes from disk\n", bufsize / T_size);
-        }
 
         if (bufsize < min_target_size) {
                 lseek(backing_fd, min_target_size, SEEK_SET);

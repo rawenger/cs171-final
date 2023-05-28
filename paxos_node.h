@@ -5,6 +5,9 @@
 #pragma once
 #include <map>
 #include <memory>
+#include <future>
+#include <boost/thread/thread.hpp>
+#include <boost/lockfree/queue.hpp>
 
 //#include "peer_connection.h"
 #include "paxos_msg.h"
@@ -40,14 +43,18 @@ struct peer_connection {
 class paxos_node {
     using peer_ptr = std::unique_ptr<peer_connection>;
 
+    // type that needs to be returned by receive_promises
+    using promise_promise = std::tuple<std::vector<cs171_cfg::socket_t>, paxos_msg::V>;
+
     // Every node is always an acceptor.
     enum NODE_STATE {
             PREPARER, // Consists of PREPARE and PROMISE messages. (Phase  I)
-            LEARNER, // Consits of ACCEPT and ACCEPTED messages.  (Phase II)
+            LEARNER, // Consists of ACCEPT and ACCEPTED messages.  (Phase II)
             FOLLOWER, // Not a proposer.
     };
 
     static constexpr int MAX_PEERS = 100;
+    static constexpr std::chrono::seconds timeout_interval {20};
     static void polling_loop(std::stop_token stoken, paxos_node *me);
 
     std::recursive_mutex pmut;
@@ -66,13 +73,15 @@ class paxos_node {
     paxos_msg::ballot_num balnum;
     std::vector<paxos_msg::V> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
+//    std::map<size_t, paxos_msg::ballot_num> accept_bals {};
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
-    std::vector<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> promises;
-    std::vector<paxos_msg::promise_msg> promises_with_value;
-    std::vector<paxos_msg::accepted_msg> accepteds;
+    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
+    sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> acc_q {};
+    boost::lockfree::queue<paxos_msg::V> request_q {64};
+    std::mutex propose_mut;
 
-    std::optional<paxos_msg::V> proposed_val; // What value has the client proposed?
+    std::jthread polling_thread {};
 
     [[noreturn]] void listen_connections();
     void send_peer_list(socket_t sock);
@@ -85,22 +94,26 @@ class paxos_node {
     void set_leader(peer_connection *new_leader)
       { leader = new_leader; }
 
-    void start_election()
-      { leader = nullptr; }
-
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
-    void receive_promise(cs171_cfg::socket_t sender, const paxos_msg::promise_msg &promise);
+
     void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept);
-    void receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted);
+
     void receive_decide(const paxos_msg::decide_msg &decision);
 
-    void broadcast_prepare(paxos_msg::V value);
-    void broadcast_accept(paxos_msg::V value);
+    void receive_promises(TimePoint timeout_time, paxos_msg::V propval,
+                          std::promise<promise_promise> retval);
+
+    void receive_accepteds(TimePoint timeout_time,
+                           std::promise<bool> retval);
+
+    std::future<promise_promise> broadcast_prepare(paxos_msg::V value);
+    std::future<bool> broadcast_accept(paxos_msg::V value, const std::vector<cs171_cfg::socket_t> &targets);
+    void broadcast_decision(paxos_msg::V value);
 
     auto say(const std::string &something) -> void;
+
 public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
     void propose(paxos_msg::V value);
     cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 };
-

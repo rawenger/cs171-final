@@ -2,7 +2,7 @@
 // Created by ryan on 4/8/23.
 //
 
-#include <openssl/evp.h>
+//#include <openssl/evp.h>
 #include <cassert>
 #include <iterator>
 #include <vector>
@@ -12,7 +12,7 @@
 #include "blockchain.h"
 
 blockchain blockchain::BLOCKCHAIN;
-static EVP_MD_CTX *sha256_ctx;
+//static EVP_MD_CTX *sha256_ctx;
 
 template<>
 struct fmt::formatter<transaction> {
@@ -79,7 +79,7 @@ blockchain::block::block(transaction t, block *prev)
 
 void blockchain::block::compute_nonce()
 {
-        assert(sha256_ctx != nullptr);
+//        assert(sha256_ctx != nullptr);
         u256 sha_out {0};
 
         this->N = 0;
@@ -101,27 +101,28 @@ void blockchain::block::hash(u256 &out)
          * - we then encode *that* string in ASCII and *finally* feed its raw bytes
          *      into the SHA-256 algorithm
          */
-        uint32_t sha_size;
+        uint32_t sha_size = 32;
         std::string sha_in = fmt::format("{}{:e}{}", H, T, N);
-        EVP_DigestInit_ex2(sha256_ctx, nullptr, nullptr);
+//        EVP_DigestInit_ex2(sha256_ctx, nullptr, nullptr);
 //        DBG("H: {}, ", H);
 //        DBG("T: {:e}, ", T);
 //        DBG("N: {}\n", N);
 //        DBG("SHA-256 input: {}\n", sha_in);
-        EVP_DigestUpdate(sha256_ctx, sha_in.c_str(), sha_in.length());
-        EVP_DigestFinal_ex(sha256_ctx, out.data(), &sha_size);
+//        EVP_DigestUpdate(sha256_ctx, sha_in.c_str(), sha_in.length());
+//        EVP_DigestFinal_ex(sha256_ctx, out.data(), &sha_size);
         assert(sha_size == 32);
+	out[0] = 0;
 }
 
 blockchain::blockchain()
 {
-        sha256_ctx = EVP_MD_CTX_create();
-        EVP_DigestInit_ex(sha256_ctx, EVP_sha256(), nullptr);
+//        sha256_ctx = EVP_MD_CTX_create();
+//        EVP_DigestInit_ex(sha256_ctx, EVP_sha256(), nullptr);
 }
 
 blockchain::~blockchain()
 {
-        EVP_MD_CTX_destroy(sha256_ctx);
+//        EVP_MD_CTX_destroy(sha256_ctx);
         delete tail;
 }
 

@@ -18,11 +18,12 @@
 #include <sys/poll.h>
 #include <fcntl.h>
 
+#include <iostream>
 #include <cassert>
 #include <cereal/archives/portable_binary.hpp>
 
+#include "debug.h"
 #include "paxos_node.h"
-#include "peer_connection.h"
 #include "cs171_cfg.h"
 #include "paxos_msg.h"
 #include "sema_q.h"
@@ -76,7 +77,6 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                 }
 
                 if (n_events == 0)
-                        // TODO: Timeout.
                         continue;
 
                 // remove peers who've closed their connection
@@ -90,14 +90,14 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                                 me->pmut.unlock();
                                 if (me->leader && me->leader->sock == pfd.fd) {
                                         DBG("Leader is down!");
-                                        std::thread{&paxos_node::start_election, me}.detach();
+                                        me->set_leader(nullptr);
                                 }
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
 
                 for (auto pfd : client_fds) {
-                        DBG("checking fd {}: events: {}\n", pfd.fd, pfd.revents);
+//                        DBG("checking fd {}: events: {}\n", pfd.fd, pfd.revents);
 
                         if (!(pfd.revents & POLLIN))
                                 continue;
@@ -133,15 +133,14 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 :       my_id(my_id),
         my_hostname(std::move(node_hostname)),
         my_port(config.my_port),
-        n_peers{config.n_peers},
+        n_peers(config.n_peers),
         balnum(0, my_id, 1),
-        accept_bals{my_id}, // TODO: figure out when we want to tell these last 2 to restore from disk
-        accept_vals{my_id}
+        accept_bals(my_id, "bals"),
+        accept_vals(my_id, "vals")
 {
         accept_bals[1] = balnum;
 
-        auto listener = new std::thread{&paxos_node::listen_connections, this};
-        listener->detach();
+        std::thread{&paxos_node::listen_connections, this}.detach();
 
         if (my_id != config.arbitrator) {
                 const auto &[id, port, hostname] = config.peers.front();
@@ -170,7 +169,6 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                 }
 
                 set_leader(new_peer(sock, config.arbitrator));
-                my_state = FOLLOWER;
 
                 if (n_peers_up > 0) {
                         auto *peers_up = new uint8_t[n_peers_up];
@@ -197,30 +195,51 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
                         }
                         delete[] peers_up;
                 }
-        } else {
-                my_state = PREPARER;
         }
+        my_state = PREPARER;
 
-        auto poller = new std::jthread{polling_loop, this};
-        poller->detach();
+        polling_thread = std::jthread{polling_loop, this};
 }
 
 void paxos_node::propose(paxos_msg::V value)
 {
-        if (my_state == PREPARER) {
-                broadcast_prepare(value);
-        } else {
-                broadcast_accept(value);
+        if (!request_q.bounded_push(value)) {
+                DBG("uh-oh, push failed oopsie\n");
+                exit(EXIT_FAILURE);
         }
+
+        (void) std::async(std::launch::async, [this] () -> void {
+                // wait till the previous operation is done
+                std::lock_guard<decltype(propose_mut)> lk1{propose_mut};
+
+                std::vector<cs171_cfg::socket_t> accept_targets{};
+                paxos_msg::V value;
+                if (!request_q.pop(value)) {
+                    DBG("ub-oh #2, pop failed\n");
+                    exit(EXIT_FAILURE);
+                }
+
+                if (my_state == PREPARER) {
+                    std::tie(accept_targets, value) = broadcast_prepare(value).get();
+                    my_state = LEARNER;
+                } else {
+                    std::lock_guard<decltype(pmut)> lk2{pmut};
+                    for (const auto &[sock, _] : peers) {
+                            accept_targets.push_back(sock);
+                    }
+                }
+
+                if (!accept_targets.empty() && broadcast_accept(value, accept_targets).get()) {
+                    broadcast_decision(value);
+                }
+        });
 }
 
-void paxos_node::broadcast_prepare(paxos_msg::V value)
+std::future<paxos_node::promise_promise> paxos_node::broadcast_prepare(paxos_msg::V value)
 {
         // Increment the sequence number of our ballot. This is a fresh proposal.
         balnum.number += 1;
-
-        // Remember the value most recently proposed by the client.
-        proposed_val = value;
+        balnum.node_pid = my_id;
 
         paxos_msg::prepare_msg prepare = balnum;
 
@@ -230,9 +249,7 @@ void paxos_node::broadcast_prepare(paxos_msg::V value)
         };
 
         auto payload = paxos_msg::encode_msg(msg);
-
         pmut.lock();
-
         for (const auto &[peer, _] : peers) {
                 // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Broadcasting PREPARE with value {} to P_{}.",
@@ -246,19 +263,29 @@ void paxos_node::broadcast_prepare(paxos_msg::V value)
                         "Choked on broadcasting a PREPARE message."
                 );
         }
-
         pmut.unlock();
+
+        const TimePoint timeout_time = Clock::now() + timeout_interval;
+        std::promise<promise_promise> prepstatus;
+        auto prepval = prepstatus.get_future();
+
+        std::thread promise_listener {&paxos_node::receive_promises,
+                                                this, timeout_time, value, std::move(prepstatus)};
+        promise_listener.detach();
+
+        return prepval;
 }
 
-void paxos_node::broadcast_accept(paxos_msg::V value)
+std::future<bool> paxos_node::broadcast_accept(
+        paxos_msg::V value,
+        const std::vector<cs171_cfg::socket_t> &targets)
 {
-        // Remember the value most recently proposed by the client.
-        proposed_val = value;
-
         paxos_msg::accept_msg accept = {
                 .balnum = balnum,
                 .value = value,
         };
+
+        accept.balnum.node_pid = my_id;
 
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::ACCEPT,
@@ -268,8 +295,7 @@ void paxos_node::broadcast_accept(paxos_msg::V value)
         auto payload = paxos_msg::encode_msg(msg);
 
         pmut.lock();
-
-        for (const auto &[peer, _] : peers) {
+        for (const auto &peer : targets) {
                 // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Broadcasting ACCEPT to P_{} with ballot ({}, {}, {}).",
                         peer_id_of(peer),
@@ -282,8 +308,52 @@ void paxos_node::broadcast_accept(paxos_msg::V value)
                         "Choked on broadcasting a ACCEPT message."
                 );
         }
+        pmut.unlock();
+
+        const TimePoint timeout_time = Clock::now() + timeout_interval;
+        std::promise<bool> accstatus;
+        auto accval = accstatus.get_future();
+
+        std::thread accept_listener {&paxos_node::receive_accepteds,
+                                                this, timeout_time, std::move(accstatus)};
+        accept_listener.detach();
+
+        return accval;
+}
+
+void paxos_node::broadcast_decision(paxos_msg::V value)
+{
+        paxos_msg::msg msg = {
+                .type = paxos_msg::MSG_TYPE::DECIDE,
+                .dec = value,
+        };
+
+        auto payload = paxos_msg::encode_msg(msg);
+
+        pmut.lock();
+
+        // TODO: Need a function to inspect all slots of the log.
+
+        for (const auto &[peer, _] : peers) {
+                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
+                say(fmt::format("Sending DECIDE to {} with value {}.",
+                        peer_id_of(peer),
+                        fmt::format("{} -${}-> {}", value.sender, value.amt, value.receiver)));
+
+                cs171_cfg::send_with_delay(
+                        peer,
+                        payload.c_str(), payload.size(),
+                        0,
+                        "Choked on a DECIDE message."
+                );
+        }
 
         pmut.unlock();
+
+        // TODO: Proposer must write to log.
+        blockchain::BLOCKCHAIN.transfer(value);
+
+        balnum.slot_number += 1;
 }
 
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
@@ -297,7 +367,7 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         // our ballot number to theirs.
 
         // TODO: Not sure when it would be the case that the two are equal, even though we're
-        // defining the relation on less than or equal to.
+        //  defining the relation on less than or equal to.
         if (balnum <= proposal) {
                 balnum = proposal;
 
@@ -330,76 +400,97 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         }
 }
 
-void paxos_node::receive_promise(cs171_cfg::socket_t sender, const paxos_msg::promise_msg &promise)
+/*
+ * Return a) We timed out
+ *        b) We are keeping the same value that we initially proposed
+ *        c) We are using a value that was sent to us in a promise message
+ */
+void paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V propval,
+                                  std::promise<promise_promise> retval)
 {
-        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-        say(fmt::format("Received PROMISE from P_{} to ballot ({}, {}, {}). Last accepted ballot is ({}, {}, {}) with value '{}'.",
-                peer_id_of(sender),
-                promise.balnum.number, promise.balnum.node_pid, promise.balnum.slot_number,
-                promise.acceptnum.number, promise.acceptnum.node_pid, promise.acceptnum.slot_number,
-                promise.acceptval.has_value() ? fmt::format("{} -${}-> {}", promise.acceptval.value().sender, promise.acceptval.value().amt, promise.acceptval.value().receiver) : "bottom"));
+        size_t n_responses = 0;
 
-        // Only if the node is promising to join the ballot we've most recently proposed.
-        if (balnum == promise.balnum) {
-                promises.push_back(std::make_tuple(sender, promise));
-                if (promise.acceptval.has_value()) {
-                        promises_with_value.push_back(promise);
+        std::vector<paxos_msg::promise_msg> promises_with_value {};
+
+        promise_promise returnval {{}, {propval}};
+
+        size_t peers_for_majority = (n_peers + 1) / 2;
+
+        while (n_responses < peers_for_majority) {
+                auto maybe_prom = prom_q.try_pop_until(timeout_time);
+
+                if (not maybe_prom.has_value()) {
+                        fmt::print("Timed out waiting for promises");
+                        // set our future to None
+                        std::get<0>(returnval).clear();
+                        retval.set_value_at_thread_exit(std::move(returnval));
+                        return;
+                }
+
+                const auto &[sender, promise] = maybe_prom.value();
+
+                say(fmt::format("Received PROMISE from P_{} to ballot ({}, {}, {}). Last accepted ballot is ({}, {}, {}) with value '{}'.",
+                        peer_id_of(sender),
+                        promise.balnum.number, promise.balnum.node_pid, promise.balnum.slot_number,
+                        promise.acceptnum.number, promise.acceptnum.node_pid, promise.acceptnum.slot_number,
+                        promise.acceptval.has_value()
+                                ? fmt::format("{} -${}-> {}",
+                                              promise.acceptval.value().sender,
+                                              promise.acceptval.value().amt,
+                                              promise.acceptval.value().receiver)
+                                : "bottom")
+                );
+
+                // Only if the node is promising to join our most recent ballot. Otherwise, it's
+                // an old promise.
+                if (balnum == promise.balnum) {
+                        n_responses += 1;
+                        std::get<0>(returnval).push_back(sender);
+                        if (promise.acceptval.has_value()) {
+                                promises_with_value.push_back(promise);
+                        }
                 }
         }
 
-        size_t peers_for_majority = n_peers / 2;
-
-        if (not (promises.size() > peers_for_majority)) {
-                return;
-        }
-
-        bool all_bottom = promises_with_value.size() < 1;
-
-        if (not all_bottom) {
-                // We have received at least one promise that is not bottom.
-                assert(not promises.empty());
-
-                auto maybe_accept_val = std::max_element(
-                        promises_with_value.cbegin(), promises_with_value.cend(),
+        // We have received at least one promise that is not bottom.
+        if (!promises_with_value.empty()) {
+                std::get<1>(returnval) =
+                        std::max_element(promises_with_value.cbegin(), promises_with_value.cend(),
                         [](const auto &p1, const auto &p2) -> bool
                                 { return p1.balnum > p2.balnum; }
-                )->acceptval;
-
-                // This promise should not be bottom.
-                assert(maybe_accept_val.has_value());
-
-                // TODO: Lock this! Is there a better way?
-                proposed_val = maybe_accept_val.value();
+                )->acceptval.value();
         }
 
-        my_state = LEARNER;
+        retval.set_value_at_thread_exit(std::move(returnval));
+}
 
-        assert(proposed_val.has_value());
-        for (const auto &[sender, prom] : promises) {
-                paxos_msg::accept_msg accept = {
-                        .balnum = prom.balnum,
-                        .value = proposed_val.value(),
-                };
+void paxos_node::receive_accepteds(const TimePoint timeout_time, std::promise<bool> retval)
+{
+        size_t n_responses = 0;
 
-                paxos_msg::msg msg = {
-                        .type = paxos_msg::MSG_TYPE::ACCEPT,
-                        .acc = accept,
-                };
+        std::vector<paxos_msg::accepted_msg> accepted {};
 
-                auto payload = paxos_msg::encode_msg(msg);
+        const size_t peers_for_majority = (n_peers + 1) / 2;
 
-                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-                say(fmt::format("Sending ACCEPT to P_{} with ballot ({}, {}, {}).",
+        while (n_responses < peers_for_majority) {
+                auto response = acc_q.try_pop_until(timeout_time);
+                if (!response) {
+                        fmt::print("Timed out waiting for accepteds");
+                        // set our future to false
+                        retval.set_value_at_thread_exit(false);
+                        return;
+                }
+
+                const auto &[sender, msg] = response.value();
+
+                say(fmt::format("Received ACCEPTED from P_{} to ballot ({}, {}, {}).",
                         peer_id_of(sender),
-                        accept.balnum.number, accept.balnum.node_pid, accept.balnum.slot_number));
+                        msg.number, msg.node_pid, msg.slot_number));
 
-                cs171_cfg::send_with_delay(
-                        sender,
-                        payload.c_str(), payload.size(),
-                        0,
-                        "Choked on a ACCEPT message."
-                );
+                n_responses += (balnum == msg);
         }
+
+        retval.set_value_at_thread_exit(true);
 }
 
 void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
@@ -436,68 +527,6 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
         }
 }
 
-void paxos_node::receive_accepted(cs171_cfg::socket_t sender, const paxos_msg::accepted_msg &accepted)
-{
-        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-        say(fmt::format("Received ACCEPTED from P_{} with ballot ({}, {}, {}).",
-                peer_id_of(sender),
-                accepted.number, accepted.node_pid, accepted.slot_number));
-
-        // Only if the node is promising to join our most recent ballot. Otherwise, it's
-        // an old reply to our accept message.
-        if (balnum == accepted) {
-                accepteds.push_back(accepted);
-        }
-
-        size_t peers_for_majority = n_peers / 2;
-
-        if (not (accepteds.size() > peers_for_majority)) {
-                return;
-        }
-
-        assert(proposed_val.has_value());
-        paxos_msg::decide_msg decision = proposed_val.value();
-
-        paxos_msg::msg msg = {
-                .type = paxos_msg::MSG_TYPE::DECIDE,
-                .dec = decision,
-        };
-
-        auto payload = paxos_msg::encode_msg(msg);
-
-        pmut.lock();
-
-        // TODO: Need a function to inspect all slots of the log.
-
-        for (const auto &[peer, _] : peers) {
-                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-                say(fmt::format("Sending DECIDE to {} with value {}.",
-                        peer_id_of(peer),
-                        fmt::format("{} -${}-> {}", decision.sender, decision.amt, decision.receiver)));
-
-                cs171_cfg::send_with_delay(
-                        peer,
-                        payload.c_str(), payload.size(),
-                        0,
-                        "Choked on a DECIDE message."
-                );
-        }
-
-        pmut.unlock();
-
-        // TODO: Proposer must commit and write to log.
-        balnum.slot_number += 1;
-
-        // Discard messages absorbed by this iteration of the concensus algorithm.
-        promises.clear();
-        promises_with_value.clear();
-        accepteds.clear();
-        proposed_val.reset();
-
-        // TODO: Skip Phase I.
-        my_state = LEARNER;
-}
-
 void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
@@ -510,15 +539,16 @@ void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
         bool success = blockchain::BLOCKCHAIN.transfer(decision);
 
         if (success) {
-                fmt::print("Success!");
+                fmt::print("Success!\n");
         } else {
-                fmt::print("Insufficient balance");
+                fmt::print("Insufficient balance.\n");
         }
 
         // Increase the slot number of our ballot number, which corresponds to the depth of
         // our blockchain. We have decided this slot number, and so our next proposal should
         // try to gain concensus on the next slot.
-        balnum.slot_number += 1;
+        ++balnum.slot_number;
+        accept_bals[balnum.slot_number] = {0, my_id, balnum.slot_number};
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -536,9 +566,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::PROMISE: {
-                if (my_state == PREPARER) {
-                        receive_promise(sender, m.prom);
-                }
+                prom_q.push({sender, m.prom});
                 break;
             }
 
@@ -548,13 +576,14 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::ACCEPTED: {
-                if (my_state == LEARNER) {
-                        receive_accepted(sender, m.accd);
-                }
+                acc_q.push({sender, m.accd});
                 break;
             }
 
             case paxos_msg::DECIDE: {
+                pmut.lock();
+                set_leader(peers[sender].get());
+                pmut.unlock();
                 receive_decide(m.dec);
                 break;
             }
@@ -626,9 +655,11 @@ void paxos_node::send_peer_list(socket_t sock)
         std::vector<uint8_t> peers_up{};
         pmut.lock();
         for (const auto &[_, peer] : peers) {
+                assert(peer->client_id != my_id);
                 peers_up.push_back(peer->client_id);
         }
         pmut.unlock();
+        DBG("sending peers {} to socket {}\n", fmt::join(peers_up, ", "), sock);
 
         auto npeers = static_cast<uint8_t>(peers_up.size());
 
@@ -692,8 +723,9 @@ auto paxos_node::say(const std::string &message) -> void
                         break;
         }
 
-        fmt::print("P_{} ({}, {}, {}) <{}>: {}\n",
-                my_id, balnum.number, balnum.node_pid, balnum.slot_number, readable_state, message);
+        std::cout << fmt::format("P_{} ({}, {}, {}) <{}>: {}",
+                my_id, balnum.number, balnum.node_pid, balnum.slot_number, readable_state, message)
+                << std::endl;
 }
 
 

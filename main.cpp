@@ -84,16 +84,16 @@ int main(int argc, char **argv)
 
         // fs_buf tests
 //        if (my_id == 1) {
-//                fs_buf<std::optional<test_serial>> test1 {1};
+//                fs_buf<std::optional<test_serial>> test1 {1, "test1"};
 //                test1[4] = {1,2,3};
-//                test1[2] = {4,5,6};
 //                test1[5] = {0,0,0};
 //                test1[100] = {7,8,9};
+//                test1[2] = {4,5,6};
 //                test1[75] = {};
 //                test1[5000] = {34, 35, 36};
 //                std::this_thread::sleep_for(std::chrono::seconds{5}); // data will still be saved even if we ctrl-C here!
 //        } else {
-//                fs_buf<std::optional<test_serial>> test1 {1, true}; // initialize data from disk backup
+//                fs_buf<std::optional<test_serial>> test1 {1, "test1"}; // initialize data from disk backup
 //                fmt::print("[2]: {}, [4]: {}, [5]: {}, [75]: {}, [100]: {}, [5000]: {}\n",
 //                           *test1[2], *test1[4], *test1[5], !!test1[75], *test1[100], *test1[5000]);
 //        }

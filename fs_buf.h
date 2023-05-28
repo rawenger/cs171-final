@@ -18,7 +18,7 @@ concept FS_BUF_T = std::is_trivially_copyable_v<T>;
 template <FS_BUF_T T>
 class fs_buf {
 public:
-    explicit fs_buf(uint8_t my_id, bool restore=false);
+    explicit fs_buf(uint8_t my_id, const char *file_label);
     fs_buf(const fs_buf &other) = delete;
     fs_buf(fs_buf &&other) noexcept;
     ~fs_buf();
