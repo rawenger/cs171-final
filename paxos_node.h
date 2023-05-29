@@ -58,14 +58,15 @@ class paxos_node {
 
     std::recursive_mutex pmut;
     std::map<socket_t, peer_ptr> peers;
-    std::atomic_flag update_pfds{false};
+    std::atomic_flag update_pfds {false};
     size_t n_peers;
 
     node_id_t my_id;
     std::string my_hostname;
     int my_port;
 
-    peer_connection *leader{nullptr};
+    // only modified in polling thread
+    std::atomic<const peer_connection *> leader {nullptr};
 
     NODE_STATE my_state;
 
@@ -88,8 +89,12 @@ class paxos_node {
 
     void handle_msg(socket_t sender, paxos_msg::msg &&m);
 
-    void set_leader(peer_connection *new_leader)
-      { leader = new_leader; }
+    // only called from polling thread
+    void set_leader(const peer_connection *new_leader)
+      { leader.store(new_leader); }
+
+    // needs to take leader parameter since another thread might set it to NULL
+    void forward_msg(const peer_connection *dest, const paxos_msg::V &val);
 
     void receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal);
 
@@ -97,15 +102,14 @@ class paxos_node {
 
     void receive_decide(const paxos_msg::decide_msg &decision);
 
-    void receive_promises(TimePoint timeout_time, paxos_msg::V propval,
-                          std::promise<promise_promise> retval);
+    std::vector<cs171_cfg::socket_t>
+    receive_promises(TimePoint timeout_time, paxos_msg::V &propval);
 
-    void receive_accepteds(TimePoint timeout_time,
-                           std::promise<bool> retval);
+    bool receive_accepteds(TimePoint timeout_time);
 
-    std::future<promise_promise> broadcast_prepare(paxos_msg::V value);
-    std::future<bool> broadcast_accept(paxos_msg::V value, const std::vector<cs171_cfg::socket_t> &targets);
-    void broadcast_decision(paxos_msg::V value);
+    std::vector<cs171_cfg::socket_t> broadcast_prepare(paxos_msg::V &value);
+    bool broadcast_accept(const paxos_msg::V &value, const std::vector<cs171_cfg::socket_t> &targets);
+    void broadcast_decision(const paxos_msg::V &value);
 
     auto say(const std::string &something) -> void;
 

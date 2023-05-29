@@ -55,6 +55,8 @@ std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 
 void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
 {
+        DBG("Node P{} up and ready for paxos!\n", me->my_id);
+
         std::vector<pollfd> client_fds {};
 
         while (!stoken.stop_requested()) {
@@ -84,14 +86,15 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (pfd.revents & SOCK_REVENT_CLOSE) {
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd)->client_id);
+                                auto lead = me->leader.load();
+                                if (lead && lead->sock == pfd.fd) {
+                                        DBG("Leader is down!\n");
+                                        me->set_leader(nullptr);
+                                }
                                 close(pfd.fd);
                                 me->pmut.lock();
                                 me->peers.erase(pfd.fd);
                                 me->pmut.unlock();
-                                if (me->leader && me->leader->sock == pfd.fd) {
-                                        DBG("Leader is down!");
-                                        me->set_leader(nullptr);
-                                }
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
@@ -190,34 +193,41 @@ void paxos_node::propose(paxos_msg::V value)
                 exit(EXIT_FAILURE);
         }
 
-        (void) std::async(std::launch::async, [this] () -> void {
+        std::thread{[this] () -> void {
                 // wait till the previous operation is done
                 std::lock_guard<decltype(propose_mut)> lk1{propose_mut};
 
                 std::vector<cs171_cfg::socket_t> accept_targets{};
                 paxos_msg::V value;
                 if (!request_q.pop(value)) {
-                    DBG("ub-oh #2, pop failed\n");
-                    exit(EXIT_FAILURE);
+                        DBG("ub-oh #2, pop failed\n");
+                        exit(EXIT_FAILURE);
                 }
 
-                if (my_state == PREPARER) {
-                    std::tie(accept_targets, value) = broadcast_prepare(value).get();
-                    my_state = LEARNER;
-                } else {
-                    std::lock_guard<decltype(pmut)> lk2{pmut};
-                    for (const auto &[sock, _] : peers) {
-                            accept_targets.push_back(sock);
-                    }
+                // TODO: jackson pls double check this logic
+                auto lead = leader.load();
+                if (lead) {
+                        forward_msg(lead, value);
+                        return;
                 }
 
-                if (!accept_targets.empty() && broadcast_accept(value, accept_targets).get()) {
-                    broadcast_decision(value);
+                if (my_state == LEARNER) { // I am the leader
+                        std::lock_guard<decltype(pmut)> lk2{pmut};
+                        for (const auto &[sock, _] : peers) {
+                                accept_targets.push_back(sock);
+                        }
+                } else { // I am not the leader, but I don't know who is
+                        accept_targets = broadcast_prepare(value); // treats `value` as out pointer
+                        if (!accept_targets.empty()) my_state = LEARNER;
                 }
-        });
+
+                if (!accept_targets.empty() && broadcast_accept(value, accept_targets)) {
+                        broadcast_decision(value);
+                }
+        }}.detach();
 }
 
-std::future<paxos_node::promise_promise> paxos_node::broadcast_prepare(paxos_msg::V value)
+std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &value)
 {
         // Increment the sequence number of our ballot. This is a fresh proposal.
         balnum.number += 1;
@@ -248,18 +258,12 @@ std::future<paxos_node::promise_promise> paxos_node::broadcast_prepare(paxos_msg
         pmut.unlock();
 
         const TimePoint timeout_time = Clock::now() + timeout_interval;
-        std::promise<promise_promise> prepstatus;
-        auto prepval = prepstatus.get_future();
 
-        std::thread promise_listener {&paxos_node::receive_promises,
-                                                this, timeout_time, value, std::move(prepstatus)};
-        promise_listener.detach();
-
-        return prepval;
+        return receive_promises(timeout_time, value);
 }
 
-std::future<bool> paxos_node::broadcast_accept(
-        paxos_msg::V value,
+bool paxos_node::broadcast_accept(
+        const paxos_msg::V &value,
         const std::vector<cs171_cfg::socket_t> &targets)
 {
         paxos_msg::accept_msg accept = {
@@ -293,17 +297,11 @@ std::future<bool> paxos_node::broadcast_accept(
         pmut.unlock();
 
         const TimePoint timeout_time = Clock::now() + timeout_interval;
-        std::promise<bool> accstatus;
-        auto accval = accstatus.get_future();
 
-        std::thread accept_listener {&paxos_node::receive_accepteds,
-                                                this, timeout_time, std::move(accstatus)};
-        accept_listener.detach();
-
-        return accval;
+        return receive_accepteds(timeout_time);
 }
 
-void paxos_node::broadcast_decision(paxos_msg::V value)
+void paxos_node::broadcast_decision(const paxos_msg::V &value)
 {
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::DECIDE,
@@ -387,14 +385,16 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
  *        b) We are keeping the same value that we initially proposed
  *        c) We are using a value that was sent to us in a promise message
  */
-void paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V propval,
-                                  std::promise<promise_promise> retval)
+std::vector<cs171_cfg::socket_t>
+paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval)
 {
         size_t n_responses = 0;
 
         std::vector<paxos_msg::promise_msg> promises_with_value {};
 
-        promise_promise returnval {{}, {propval}};
+//        promise_promise returnval {{}, {propval}};
+
+        std::vector<cs171_cfg::socket_t> retvec {};
 
         size_t peers_for_majority = (n_peers + 1) / 2;
 
@@ -402,11 +402,11 @@ void paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V pro
                 auto maybe_prom = prom_q.try_pop_until(timeout_time);
 
                 if (not maybe_prom.has_value()) {
-                        fmt::print("Timed out waiting for promises");
+                        fmt::print("Timed out waiting for promises\n");
                         // set our future to None
-                        std::get<0>(returnval).clear();
-                        retval.set_value_at_thread_exit(std::move(returnval));
-                        return;
+//                        std::get<0>(returnval).clear();
+//                        retval.set_value_at_thread_exit(std::move(returnval));
+                        return {};
                 }
 
                 const auto &[sender, promise] = maybe_prom.value();
@@ -427,7 +427,8 @@ void paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V pro
                 // an old promise.
                 if (balnum == promise.balnum) {
                         n_responses += 1;
-                        std::get<0>(returnval).push_back(sender);
+//                        std::get<0>(returnval).push_back(sender);
+                        retvec.push_back(sender);
                         if (promise.acceptval.has_value()) {
                                 promises_with_value.push_back(promise);
                         }
@@ -436,17 +437,18 @@ void paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V pro
 
         // We have received at least one promise that is not bottom.
         if (!promises_with_value.empty()) {
-                std::get<1>(returnval) =
+                propval =
                         std::max_element(promises_with_value.cbegin(), promises_with_value.cend(),
                         [](const auto &p1, const auto &p2) -> bool
                                 { return p1.balnum > p2.balnum; }
                 )->acceptval.value();
         }
 
-        retval.set_value_at_thread_exit(std::move(returnval));
+//        retval.set_value_at_thread_exit(std::move(returnval));
+        return retvec;
 }
 
-void paxos_node::receive_accepteds(const TimePoint timeout_time, std::promise<bool> retval)
+bool paxos_node::receive_accepteds(const TimePoint timeout_time)
 {
         size_t n_responses = 0;
 
@@ -457,10 +459,8 @@ void paxos_node::receive_accepteds(const TimePoint timeout_time, std::promise<bo
         while (n_responses < peers_for_majority) {
                 auto response = acc_q.try_pop_until(timeout_time);
                 if (!response) {
-                        fmt::print("Timed out waiting for accepteds");
-                        // set our future to false
-                        retval.set_value_at_thread_exit(false);
-                        return;
+                        fmt::print("Timed out waiting for accepteds\n");
+                        return false;
                 }
 
                 const auto &[sender, msg] = response.value();
@@ -472,7 +472,7 @@ void paxos_node::receive_accepteds(const TimePoint timeout_time, std::promise<bo
                 n_responses += (balnum == msg);
         }
 
-        retval.set_value_at_thread_exit(true);
+        return true;
 }
 
 void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept)
@@ -567,6 +567,11 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
                 set_leader(peers[sender].get());
                 pmut.unlock();
                 receive_decide(m.dec);
+                break;
+            }
+
+            case paxos_msg::FWD_VAL: {
+                propose(m.fwd);
                 break;
             }
 
@@ -685,4 +690,17 @@ bool paxos_node::has_connection_to(cs171_cfg::node_id_t id)
                 if (id == peer->client_id)
                         return true;
         return false;
+}
+
+void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &val)
+{
+        DBG("Forwarding message to P{}\n", dest->client_id);
+
+        std::string payload = paxos_msg::encode_msg({.type = paxos_msg::FWD_VAL, .fwd = val});
+
+        cs171_cfg::send_with_delay(dest->sock,
+                                   payload.c_str(),
+                                   payload.length(),
+                                   0,
+                                   "Unable to forward message to leader");
 }

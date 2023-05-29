@@ -22,6 +22,7 @@ namespace paxos_msg {
             "ACCEPT",
             "ACCEPTED",
             "DECIDE",
+            "FWD_VAL",
     };
 
     enum MSG_TYPE : uint8_t {
@@ -35,6 +36,8 @@ namespace paxos_msg {
         ACCEPT,
         ACCEPTED,
         DECIDE,
+
+        FWD_VAL, // value forwarded to "known leader"
 
         /* no additional data needs to be read */
     };
@@ -94,6 +97,7 @@ namespace paxos_msg {
 //    using accept_msg = ballot_num; // also needs value
     using accepted_msg = ballot_num;
     using decide_msg = V;
+    using fwd_msg = V;
 
     struct promise_msg {
         /* Ballot number
@@ -123,6 +127,7 @@ namespace paxos_msg {
             accept_msg acc;
             accepted_msg accd;
             decide_msg dec;
+            fwd_msg fwd;
         };
 
         template<class Archive>
@@ -134,14 +139,11 @@ namespace paxos_msg {
                 case ACCEPT: { ar(acc.balnum, acc.value); break; }
                 case ACCEPTED: { ar(accd); break; }
                 case DECIDE: { ar(dec); break; }
+                case FWD_VAL: { ar(fwd); break; }
                 default: break;
             }
         }
     };
-
-//    template <MSG_TYPE Type>
-//    msg new_msg()
-        // note: use forwarding to make sure we take in the parameters that correspond to the appropriate constructor
 
     std::string encode_msg(msg m);
     msg decode_msg(const std::string &data);
