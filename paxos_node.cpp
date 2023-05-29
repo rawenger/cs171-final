@@ -142,60 +142,42 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
         std::thread{&paxos_node::listen_connections, this}.detach();
 
-        if (my_id != config.arbitrator) {
-                const auto &[id, port, hostname] = config.peers.front();
-                assert(id == config.arbitrator);
-                auto arb_addr = hostname_lookup(hostname, port);
-                socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+        for (const auto &[id, port, hostname] : config.peers) {
+                if (id == my_id || has_connection_to(id))
+                        continue;
 
-                if (connect(sock, arb_addr.get(), sizeof(sockaddr_in)) < 0) {
-                        perror("Unable to connect to arbitrator node");
-                        exit(EXIT_FAILURE);
+                auto addr = hostname_lookup(hostname, port);
+                socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+                pmut.lock(); // make sure that we are allowed to make a new outgoing connection
+                if (connect(sock, addr.get(), sizeof(sockaddr_in)) < 0) {
+                        close(sock);
+                        pmut.unlock();
+                        continue;
                 }
-                DBG("Connected to peer PID {}", config.arbitrator);
+                new_peer(sock, id); // need this up here so listener thread can learn of duplicates
+                pmut.unlock();
+
+                fmt::print("Connected to peer P{}\n", id);
 
                 if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
-                        perror("Unable to send PID to connection arbitrator");
+                        perror("Unable to send PID to new peer");
                         exit(EXIT_FAILURE);
                 }
 
-                paxos_msg::MSG_TYPE im_new = paxos_msg::IM_NEW;
-                cs171_cfg::send_with_delay<false>(sock, &im_new, sizeof im_new, 0);
-
-                uint8_t n_peers_up;
-                if (recv(sock, &n_peers_up, sizeof n_peers_up, 0) < 0) {
-                        perror("Unable to recv peer network info");
+                paxos_msg::MSG_TYPE handshake;
+                if (recv(sock, &handshake, sizeof handshake, 0) < 0) {
+                        perror("Unable to recv connection handshake status");
                         exit(EXIT_FAILURE);
                 }
 
-                set_leader(new_peer(sock, config.arbitrator));
-
-                if (n_peers_up > 0) {
-                        auto *peers_up = new uint8_t[n_peers_up];
-                        if (recv(sock, peers_up, n_peers_up, 0) < 0)
-                                perror("recv() peers_up");
-
-                        // start listening for new connections from other nodes
-                        // sorting allows us to do this in O(n log n) instead of O(n^2)
-                        std::sort(peers_up, peers_up + n_peers_up);
-
-                        int peer = 0;
-                        for (const auto &[pid, pport, phostname] : config.peers) {
-                                if (peers_up[peer] != pid)
-                                        continue;
-
-                                // TODO: check that the PID isn't already in peers map
-                                //  not sure if this could be a problem, but make sure not
-                                //  to check this->peers.contains(pid) since that will lookup
-                                //  the socket file descriptor. Checking for pid is O(n).
-                                connect_to(pid, pport, phostname);
-
-                                if (++peer == n_peers_up)
-                                        break;
-                        }
-                        delete[] peers_up;
+                // the peer we've just connected to informs us we already have an existing connection to them
+                if (handshake == paxos_msg::DUPLICATE) {
+                        pmut.lock();
+                        peers.erase(sock);
+                        pmut.unlock();
                 }
         }
+
         my_state = PREPARER;
 
         polling_thread = std::jthread{polling_loop, this};
@@ -534,7 +516,7 @@ void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
                 fmt::format("{} -${}-> {}", decision.sender, decision.amt, decision.receiver)));
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
-        // recover from. I don't believe this is part of the spec though.
+        //  recover from. I don't believe this is part of the spec though.
 
         bool success = blockchain::BLOCKCHAIN.transfer(decision);
 
@@ -588,7 +570,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
                 break;
             }
 
-            case paxos_msg::IM_NEW:
+            case paxos_msg::DUPLICATE:
             case paxos_msg::HANDSHAKE_COMPLETE: {
                 assert(false);
                 break;
@@ -631,69 +613,27 @@ void paxos_node::listen_connections()
                         continue;
                 }
 
+                pmut.lock(); // block any more outgoing connections from happening
+
                 node_id_t newid;
                 recv(newsock, &newid, sizeof newid, 0);
 
-                DBG("Accepted incoming connection from PID {}\n", newid);
+                paxos_msg::MSG_TYPE action =
+                        has_connection_to(newid) ? paxos_msg::DUPLICATE : paxos_msg::HANDSHAKE_COMPLETE;
 
-                paxos_msg::MSG_TYPE action;
-                recv(newsock, &action, sizeof action, 0);
+                DBG("Accepted incoming {}connection from PID {}\n",
+                    action == paxos_msg::DUPLICATE ? "(duplicate) " : "",
+                    newid);
 
-                if (action == paxos_msg::IM_NEW) {
-                        send_peer_list(newsock);
-                } else {
-                        assert(action == paxos_msg::HANDSHAKE_COMPLETE);
-                }
+                cs171_cfg::send_with_delay<false>(newsock, &action, sizeof action, 0);
 
-                new_peer(newsock, newid);
+                if (action == paxos_msg::DUPLICATE)
+                        close(newsock);
+                else
+                        new_peer(newsock, newid);
+
+                pmut.unlock(); // MUST be dropped AFTER we add the new peer to our peerlist
         }
-}
-
-void paxos_node::send_peer_list(socket_t sock)
-{
-        // send a list of all the clients who are currently up and connected (listening)
-        std::vector<uint8_t> peers_up{};
-        pmut.lock();
-        for (const auto &[_, peer] : peers) {
-                assert(peer->client_id != my_id);
-                peers_up.push_back(peer->client_id);
-        }
-        pmut.unlock();
-        DBG("sending peers {} to socket {}\n", fmt::join(peers_up, ", "), sock);
-
-        auto npeers = static_cast<uint8_t>(peers_up.size());
-
-        cs171_cfg::send_with_delay(sock, &npeers, sizeof npeers, 0);
-
-        if (npeers > 0)
-                cs171_cfg::send_with_delay(sock, peers_up.data(), peers_up.size(), 0);
-}
-
-void paxos_node::connect_to(node_id_t id, int peer_port, const std::string &peer_hostname)
-{
-        /* connect to client P<id> at <hostname>:<port> */
-        socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) {
-                perror("Unable to create peer socket");
-                exit(EXIT_FAILURE);
-        }
-
-        auto peer_addr = hostname_lookup(peer_hostname, peer_port);
-
-        if (connect(sock, peer_addr.get(), sizeof(sockaddr_in)) < 0) {
-                perror("Unable to connect to peer");
-                exit(EXIT_FAILURE);
-        }
-
-        cs171_cfg::send_with_delay(sock, &my_id, sizeof my_id, 0, "Unable to send ID to peer");
-        paxos_msg::MSG_TYPE handshake = paxos_msg::HANDSHAKE_COMPLETE;
-        cs171_cfg::send_with_delay(sock, &handshake, sizeof handshake, 0,
-                                   "Unable to send handshake to peer");
-
-        new_peer(sock, id);
-
-        DBG("Connected to peer PID {}\n", id);
-//        say(this, "Connected to peer ID 'P{}' on fd #{}\n", id, sock);
 }
 
 peer_connection *paxos_node::new_peer(socket_t sock, node_id_t id)
@@ -731,8 +671,18 @@ auto paxos_node::say(const std::string &message) -> void
 
 cs171_cfg::node_id_t paxos_node::peer_id_of(cs171_cfg::socket_t peer)
 {
-        pmut.lock();
+        std::lock_guard<decltype(pmut)> lk{pmut};
         cs171_cfg::socket_t id = peers.at(peer)->client_id;
-        pmut.unlock();
+
         return id;
+}
+
+bool paxos_node::has_connection_to(cs171_cfg::node_id_t id)
+{
+        std::lock_guard<decltype(pmut)> lk{pmut};
+
+        for (const auto &[_, peer] : peers)
+                if (id == peer->client_id)
+                        return true;
+        return false;
 }

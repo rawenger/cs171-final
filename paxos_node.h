@@ -6,7 +6,6 @@
 #include <map>
 #include <memory>
 #include <future>
-#include <boost/thread/thread.hpp>
 #include <boost/lockfree/queue.hpp>
 
 //#include "peer_connection.h"
@@ -84,8 +83,6 @@ class paxos_node {
     std::jthread polling_thread {};
 
     [[noreturn]] void listen_connections();
-    void send_peer_list(socket_t sock);
-    void connect_to(node_id_t id, int peer_port, const std::string &peer_hostname);
 
     peer_connection *new_peer(socket_t sock, node_id_t id);
 
@@ -112,8 +109,11 @@ class paxos_node {
 
     auto say(const std::string &something) -> void;
 
+    cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
+
+    bool has_connection_to(cs171_cfg::node_id_t id);
+
 public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
     void propose(paxos_msg::V value);
-    cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 };

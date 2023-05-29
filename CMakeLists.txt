@@ -23,14 +23,14 @@ endif()
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -O0")
     if (${CMAKE_HOST_LINUX})
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")# -fsanitize=thread,undefined")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread,undefined")
     endif()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -O2")
 endif()
 
-#find_package(OpenSSL REQUIRED)
-#target_link_libraries(cs171_final OpenSSL::SSL)
+find_package(OpenSSL REQUIRED)
+target_link_libraries(cs171_final OpenSSL::SSL)
 
 find_package(fmt REQUIRED)
 

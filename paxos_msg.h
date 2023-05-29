@@ -15,7 +15,7 @@ namespace paxos_msg {
     using V = transaction;
 
     static constexpr const char *msg_types[] = {
-            "IM_NEW",
+            "DUPLICATE",
             "HANDSHAKE_COMPLETE",
             "PREPARE", // propose
             "PROMISE",
@@ -25,7 +25,8 @@ namespace paxos_msg {
     };
 
     enum MSG_TYPE : uint8_t {
-        IM_NEW, // ask for a listing of other nodes in the network
+        // messages sent during initial connection handshake
+        DUPLICATE = 0, // a connection between these 2 nodes already exists--we can safely close the new one
         HANDSHAKE_COMPLETE,
 
         /* types that include additional data */
@@ -49,7 +50,7 @@ namespace paxos_msg {
 
         ballot_num() = default;
 
-            template <class Archive>
+        template <class Archive>
         void serialize(Archive &ar)
         { ar(number), ar(node_pid), ar(slot_number); }
 
