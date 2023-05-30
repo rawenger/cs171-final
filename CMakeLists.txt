@@ -34,6 +34,9 @@ target_link_libraries(cs171_final OpenSSL::SSL)
 
 find_package(fmt REQUIRED)
 
+find_package(Boost REQUIRED
+            COMPONENTS thread)
+
 foreach(EXE IN ITEMS ${EXECUTABLES})
     target_link_libraries(${EXE} fmt::fmt-header-only)
 endforeach()
