@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "interface.hpp"
+#include "interface.h"
 
 auto parse_list(const std::string &text) -> arguments
 {
