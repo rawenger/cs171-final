@@ -16,6 +16,7 @@ struct input {
         CRASH,      // crash()
         FAIL_LINK,  // failLink(dest)
         FIX_LINK,   // fixLink(dest)
+        TRANSACTION,
         BLOCKCHAIN, // blockchain()
         QUEUE,      // queue()
         LOG         // log()

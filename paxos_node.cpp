@@ -193,6 +193,7 @@ void paxos_node::propose(paxos_msg::V value)
                 exit(EXIT_FAILURE);
         }
 
+        // TODO: do we need to put the operation back on the queue if we don't reach a DECIDE on it?
         std::thread{[this] () -> void {
                 // wait till the previous operation is done
                 std::lock_guard<decltype(propose_mut)> lk1{propose_mut};
@@ -226,6 +227,35 @@ void paxos_node::propose(paxos_msg::V value)
                 }
         }}.detach();
 }
+
+bool paxos_node::fail_link(cs171_cfg::node_id_t peer)
+{
+        fmt::print("fail_link() STUB\n");
+        return true;
+}
+
+bool paxos_node::fix_link(cs171_cfg::node_id_t peer)
+{
+        fmt::print("fix_link() STUB\n");
+        return true;
+}
+
+std::string paxos_node::dump_op_queue() /* const */
+{
+        // TODO: Seriously the only way I can think of implementing this is to derive the lock-free
+        //  queue class and add a (thread-unsafe) iterator over the nodes.
+        //  Or add a copy constructor. ugh.
+        return "dump_op_queue() STUB";
+}
+
+std::string paxos_node::dump_log() const
+{
+        return "dump_log() STUB";
+}
+
+/************************************************************************************
+ *                              PRIVATE MEMBER FUNCTIONS
+ ************************************************************************************/
 
 std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &value)
 {
@@ -380,14 +410,14 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
         }
 }
 
-/*
- * Return a) We timed out
- *        b) We are keeping the same value that we initially proposed
- *        c) We are using a value that was sent to us in a promise message
- */
 std::vector<cs171_cfg::socket_t>
 paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval)
 {
+        /*
+         * Return a) We timed out
+         *        b) We are keeping the same value that we initially proposed
+         *        c) We are using a value that was sent to us in a promise message
+         */
         size_t n_responses = 0;
 
         std::vector<paxos_msg::promise_msg> promises_with_value {};
@@ -653,7 +683,7 @@ peer_connection *paxos_node::new_peer(socket_t sock, node_id_t id)
         return res; //NOLINT
 }
 
-auto paxos_node::say(const std::string &message) -> void
+void paxos_node::say(const std::string &message) const
 {
         std::string readable_state;
         switch (my_state) {

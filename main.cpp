@@ -21,7 +21,7 @@
 #include "sema_q.h"
 #include "cs171_cfg.h"
 #include "paxos_node.h"
-#include "fs_buf.h"
+#include "cli_interface.h"
 
 struct exit_t {};
 using wait_t = std::chrono::seconds;
@@ -82,59 +82,70 @@ int main(int argc, char **argv)
         else
                 my_id = atoi(argv[1]);
 
-        // fs_buf tests
-//        if (my_id == 1) {
-//                fs_buf<std::optional<test_serial>> test1 {1, "test1"};
-//                test1[4] = {1,2,3};
-//                test1[5] = {0,0,0};
-//                test1[100] = {7,8,9};
-//                test1[2] = {4,5,6};
-//                test1[75] = {};
-//                test1[5000] = {34, 35, 36};
-//                std::this_thread::sleep_for(std::chrono::seconds{5}); // data will still be saved even if we ctrl-C here!
-//        } else {
-//                fs_buf<std::optional<test_serial>> test1 {1, "test1"}; // initialize data from disk backup
-//                fmt::print("[2]: {}, [4]: {}, [5]: {}, [75]: {}, [100]: {}, [5000]: {}\n",
-//                           *test1[2], *test1[4], *test1[5], !!test1[75], *test1[100], *test1[5000]);
-//        }
-//        return 0;
+        /* Constructing this object will open and parse the config.csv file */
+        cs171_cfg::system_cfg config{};
 
-        #if 1
-                /* Constructing this object will open and parse the config.csv file */
-                cs171_cfg::system_cfg config{};
+        paxos_node node{config, my_id, my_hostname};
 
-                paxos_node node{config, my_id, my_hostname};
+        while (true) {
+                std::string in;
+                std::cout << "> ";
+                std::getline(std::cin, in);
 
-                while (1) {
-                        std::string in;
-                        std::cout << "> ";
-                        std::getline(std::cin, in);
-                        if (in.empty())
-                                continue;
+                if (in.empty())
+                        continue;
 
-                        cmd_t cmd = parse_cmd(in);
+                // so we don't have to type crash() every time lmao
+                if (in.starts_with("exit"))
+                        break;
 
-                        if (std::holds_alternative<exit_t>(cmd)) {
-                                break;
-                        }
+                std::optional<input> cmd = parse_input(in);
 
-                        else if (std::holds_alternative<wait_t>(cmd)) {
-                                std::this_thread::sleep_for(std::get<wait_t>(cmd));
-                                continue;
-                        }
-
-                        request_t req = std::get<request_t>(cmd);
-                        if (req.type == request_t::INVALID_REQUEST) {
-                                continue;
-                        }
-
-                        switch (req.type) {
-                                case request_t::TR_REQUEST:
-                                        node.propose(req.tr);
-                                        break;
-                        }
+                if (!cmd) {
+                        std::cerr << "Invalid input" << std::endl;
+                        continue;
                 }
-        #endif
+
+                switch (cmd->tag) {
+                    case input::KIND::CRASH:
+                        goto exit;
+                        break;
+                    case input::KIND::FAIL_LINK: {
+                        cs171_cfg::node_id_t dest = cmd->fail_link.dest;
+                        if (node.fail_link(dest)) {
+                                fmt::print("Successfully severed link with P{}\n", dest);
+                        } else {
+                                fmt::print(stderr, "Failed to sever link with P{}\n", dest);
+                        }
+                        break;
+                    }
+                    case input::KIND::FIX_LINK: {
+                        cs171_cfg::node_id_t dest = cmd->fix_link.dest;
+                        if (node.fix_link(dest)) {
+                                fmt::print("Repaired link with P{}\n", dest);
+                        } else {
+                                fmt::print(stderr, "Unable to repair link to P{}\n", dest);
+                        }
+                        break;
+                    }
+                    case input::KIND::TRANSACTION: {
+                        // STUB
+                        break;
+                    }
+                    case input::KIND::BLOCKCHAIN:
+                        fmt::print("{}\n", blockchain::BLOCKCHAIN.get_history());
+                        break;
+                    case input::KIND::QUEUE:
+                        fmt::print("{}\n", node.dump_op_queue());
+                        break;
+                    case input::KIND::LOG:
+                        fmt::print("{}\n", node.dump_log());
+                        break;
+                }
+        }
+exit:
+
+        return 0;
 }
 
 cs171_cfg::system_cfg::system_cfg()

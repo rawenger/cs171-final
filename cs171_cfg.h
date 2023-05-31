@@ -5,6 +5,8 @@
 #pragma once
 #include <thread>
 #include <vector>
+#include <sys/socket.h>
+
 namespace cs171_cfg {
     using namespace std::chrono_literals;
     constexpr const char *CLIENT_CFG = "clients.csv";

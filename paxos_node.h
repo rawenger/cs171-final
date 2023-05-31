@@ -111,7 +111,7 @@ class paxos_node {
     bool broadcast_accept(const paxos_msg::V &value, const std::vector<cs171_cfg::socket_t> &targets);
     void broadcast_decision(const paxos_msg::V &value);
 
-    auto say(const std::string &something) -> void;
+    void say(const std::string &something) const;
 
     cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 
@@ -120,4 +120,8 @@ class paxos_node {
 public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
     void propose(paxos_msg::V value);
+    bool fail_link(cs171_cfg::node_id_t peer);
+    bool fix_link(cs171_cfg::node_id_t peer);
+    std::string dump_op_queue() /* const */;
+    std::string dump_log() const;
 };
