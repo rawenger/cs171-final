@@ -4,12 +4,91 @@
 
 #include "interface.h"
 
-auto parse_list(const std::string &text) -> arguments
+static auto parse_list(const std::string &text) -> input::arguments;
+static auto parse_call(const std::string &text) -> std::optional<input::call>;
+static auto parse_name(const std::string &text) -> std::optional<input::INPUT_KIND>;
+static auto parse_pid(const std::string &text) -> std::optional<input::pid>;
+
+auto parse_input(const std::string &text) -> std::optional<input>
+{
+    std::optional<input> maybe_input;
+    const auto maybe_call = parse_call(text);
+    if (not maybe_call.has_value()) {
+        return maybe_input;
+    }
+    const auto &[name, args] = maybe_call.value();
+
+    const auto maybe_kind = parse_name(name);
+    if (not maybe_kind.has_value()) {
+        return maybe_input;
+    }
+    auto kind = maybe_kind.value();
+
+    input input{};
+    switch (kind) {
+        case input::INPUT_KIND::CRASH: {
+            input.crash = {
+                .kind = kind,
+            };
+            break;
+        }
+        case input::INPUT_KIND::FAIL_LINK: {
+            if (args.size() != 1) {
+                return maybe_input;
+            }
+            auto pid = parse_pid(args.at(0));
+            if (not pid.has_value()) {
+                return maybe_input;
+            }
+            input.fail_link = {
+                .kind = kind,
+                .dest = pid.value(),
+            };
+            break;
+        }
+        case input::INPUT_KIND::FIX_LINK: {
+            if (args.size() != 1) {
+                return maybe_input;
+            }
+            auto pid = parse_pid(args.at(0));
+            if (not pid.has_value()) {
+                return maybe_input;
+            }
+            input.fix_link = {
+                .kind = kind,
+                .dest = pid.value(),
+            };
+            break;
+        }
+        case input::INPUT_KIND::BLOCKCHAIN: {
+            input.blockchain = {
+                .kind = kind,
+            };
+            break;
+        }
+        case input::INPUT_KIND::QUEUE: {
+            input.queue = {
+                .kind = kind,
+            };
+            break;
+        }
+        case input::INPUT_KIND::LOG: {
+            input.log = {
+                .kind = kind,
+            };
+            break;
+        }
+    }
+
+    return input;
+}
+
+static auto parse_list(const std::string &text) -> input::arguments
 {
     const std::string sep = ", ";
-    std::vector<std::string> args = { };
+    std::vector<std::string> args { };
 
-    if (text.size() < 1) {
+    if (text.empty()) {
         return args;
     }
 
@@ -29,9 +108,9 @@ auto parse_list(const std::string &text) -> arguments
     return args;
 }
 
-auto parse_call(const std::string &text) -> std::optional<call>
+static auto parse_call(const std::string &text) -> std::optional<input::call>
 {
-    std::optional<call> call;
+    std::optional<input::call> call;
 
     size_t args_start = text.find('(');
     if (args_start++ == std::string::npos) {
@@ -39,7 +118,7 @@ auto parse_call(const std::string &text) -> std::optional<call>
     }
 
     auto name = text.substr(0, args_start - 1);
-    if (name.size() < 1) {
+    if (name.empty()) {
         return call;
     }
 
@@ -54,104 +133,30 @@ auto parse_call(const std::string &text) -> std::optional<call>
     return call;
 }
 
-auto parse_input(const std::string &text) -> std::optional<input>
+static auto parse_name(const std::string &text) -> std::optional<input::INPUT_KIND>
 {
-    std::optional<input> maybe_input;
-    const auto maybe_call = parse_call(text);
-    if (not maybe_call.has_value()) {
-        return maybe_input;
-    }
-    const auto &[name, args] = maybe_call.value();
-
-    const auto maybe_kind = parse_name(name);
-    if (not maybe_kind.has_value()) {
-        return maybe_input;
-    }
-    auto kind = maybe_kind.value();
-
-    input input;
-    switch (kind) {
-        case input::kind_t::crash: {
-            input.crash = {
-                .kind = kind,
-            };
-            break;
-        }
-        case input::kind_t::fail_link: {
-            if (args.size() != 1) {
-                return maybe_input;
-            }
-            auto pid = parse_pid(args.at(0));
-            if (not pid.has_value()) {
-                return maybe_input;
-            }
-            input.fail_link = {
-                .kind = kind,
-                .dest = pid.value(),
-            };
-            break;
-        }
-        case input::kind_t::fix_link: {
-            if (args.size() != 1) {
-                return maybe_input;
-            }
-            auto pid = parse_pid(args.at(0));
-            if (not pid.has_value()) {
-                return maybe_input;
-            }
-            input.fix_link = {
-                .kind = kind,
-                .dest = pid.value(),
-            };
-            break;
-        }
-        case input::kind_t::blockchain: {
-            input.blockchain = {
-                .kind = kind,
-            };
-            break;
-        }
-        case input::kind_t::queue: {
-            input.queue = {
-                .kind = kind,
-            };
-            break;
-        }
-        case input::kind_t::log: {
-            input.log = {
-                .kind = kind,
-            };
-            break;
-        }
-    }
-
-    return input;
-}
-
-auto parse_name(const std::string &text) -> std::optional<input::kind_t>
-{
-    std::optional<input::kind_t> kind;
+    std::optional<input::INPUT_KIND> kind;
 
     if (text == "crash") {
-        kind = input::kind_t::crash;
+        kind = input::INPUT_KIND::CRASH;
     } else if (text == "failLink") {
-        kind = input::kind_t::fail_link;
+        kind = input::INPUT_KIND::FAIL_LINK;
     } else if (text == "fixLink") {
-        kind = input::kind_t::fix_link;
+        kind = input::INPUT_KIND::FIX_LINK;
     } else if (text == "blockchain") {
-        kind = input::kind_t::blockchain;
+        kind = input::INPUT_KIND::BLOCKCHAIN;
     } else if (text == "queue") {
-        kind = input::kind_t::queue;
+        kind = input::INPUT_KIND::QUEUE;
     } else if (text == "log") {
-        kind = input::kind_t::log;
+        kind = input::INPUT_KIND::LOG;
     }
 
     return kind;
 }
 
-auto parse_pid(const std::string &text) -> std::optional<pid>
+static auto parse_pid(const std::string &text) -> std::optional<input::pid>
 {
-    std::optional<pid> maybe_pid;
+    std::optional<input::pid> maybe_pid;
 
     if (text.at(0) != 'P') {
         return maybe_pid;
@@ -160,7 +165,7 @@ auto parse_pid(const std::string &text) -> std::optional<pid>
     try {
         int pid = std::stoi(text.substr(1));
         maybe_pid = pid;
-    } catch (std::invalid_argument) { }
+    } catch (std::invalid_argument &) { }
 
     return maybe_pid;
 }
