@@ -6,7 +6,7 @@ set(CMAKE_CXX_COMPILER g++)
 
 set(EXECUTABLES cs171_final)
 
-add_executable(cs171_final main.cpp paxos_node.cpp blockchain.cpp paxos_msg.cpp interface.cpp)
+add_executable(cs171_final main.cpp paxos_node.cpp blockchain.cpp paxos_msg.cpp cli_interface.cpp)
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/cereal/include")
 
 if (${CMAKE_HOST_APPLE})

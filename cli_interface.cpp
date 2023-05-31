@@ -2,11 +2,11 @@
 #include <string>
 #include <vector>
 
-#include "interface.h"
+#include "cli_interface.h"
 
 static auto parse_list(const std::string &text) -> input::arguments;
 static auto parse_call(const std::string &text) -> std::optional<input::call>;
-static auto parse_name(const std::string &text) -> std::optional<input::INPUT_KIND>;
+static auto parse_name(const std::string &text) -> std::optional<input::KIND>;
 static auto parse_pid(const std::string &text) -> std::optional<input::pid>;
 
 auto parse_input(const std::string &text) -> std::optional<input>
@@ -24,15 +24,16 @@ auto parse_input(const std::string &text) -> std::optional<input>
     }
     auto kind = maybe_kind.value();
 
-    input input{};
+    input input {.tag = kind};
     switch (kind) {
-        case input::INPUT_KIND::CRASH: {
-            input.crash = {
-                .kind = kind,
-            };
+        case input::KIND::CRASH:
+        case input::KIND::BLOCKCHAIN:
+        case input::KIND::QUEUE:
+        case input::KIND::LOG: {
             break;
         }
-        case input::INPUT_KIND::FAIL_LINK: {
+
+        case input::KIND::FAIL_LINK: {
             if (args.size() != 1) {
                 return maybe_input;
             }
@@ -41,12 +42,12 @@ auto parse_input(const std::string &text) -> std::optional<input>
                 return maybe_input;
             }
             input.fail_link = {
-                .kind = kind,
                 .dest = pid.value(),
             };
             break;
         }
-        case input::INPUT_KIND::FIX_LINK: {
+
+        case input::KIND::FIX_LINK: {
             if (args.size() != 1) {
                 return maybe_input;
             }
@@ -55,26 +56,7 @@ auto parse_input(const std::string &text) -> std::optional<input>
                 return maybe_input;
             }
             input.fix_link = {
-                .kind = kind,
                 .dest = pid.value(),
-            };
-            break;
-        }
-        case input::INPUT_KIND::BLOCKCHAIN: {
-            input.blockchain = {
-                .kind = kind,
-            };
-            break;
-        }
-        case input::INPUT_KIND::QUEUE: {
-            input.queue = {
-                .kind = kind,
-            };
-            break;
-        }
-        case input::INPUT_KIND::LOG: {
-            input.log = {
-                .kind = kind,
             };
             break;
         }
@@ -133,22 +115,22 @@ static auto parse_call(const std::string &text) -> std::optional<input::call>
     return call;
 }
 
-static auto parse_name(const std::string &text) -> std::optional<input::INPUT_KIND>
+static auto parse_name(const std::string &text) -> std::optional<input::KIND>
 {
-    std::optional<input::INPUT_KIND> kind;
+    std::optional<input::KIND> kind {};
 
     if (text == "crash") {
-        kind = input::INPUT_KIND::CRASH;
+        kind = input::KIND::CRASH;
     } else if (text == "failLink") {
-        kind = input::INPUT_KIND::FAIL_LINK;
+        kind = input::KIND::FAIL_LINK;
     } else if (text == "fixLink") {
-        kind = input::INPUT_KIND::FIX_LINK;
+        kind = input::KIND::FIX_LINK;
     } else if (text == "blockchain") {
-        kind = input::INPUT_KIND::BLOCKCHAIN;
+        kind = input::KIND::BLOCKCHAIN;
     } else if (text == "queue") {
-        kind = input::INPUT_KIND::QUEUE;
+        kind = input::KIND::QUEUE;
     } else if (text == "log") {
-        kind = input::INPUT_KIND::LOG;
+        kind = input::KIND::LOG;
     }
 
     return kind;
