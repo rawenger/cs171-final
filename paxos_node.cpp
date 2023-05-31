@@ -188,6 +188,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
 void paxos_node::propose(paxos_msg::V value)
 {
+        DBG("Proposing {}\n", value);
         if (!request_q.bounded_push(value)) {
                 DBG("uh-oh, push failed oopsie\n");
                 exit(EXIT_FAILURE);
@@ -273,9 +274,8 @@ std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &val
         auto payload = paxos_msg::encode_msg(msg);
         pmut.lock();
         for (const auto &[peer, _] : peers) {
-                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Broadcasting PREPARE with value {} to P_{}.",
-                        fmt::format("{} -${}-> {}", value.sender, value.amt, value.receiver),
+                        value,
                         peer_id_of(peer)));
 
                 cs171_cfg::send_with_delay(
@@ -724,7 +724,7 @@ bool paxos_node::has_connection_to(cs171_cfg::node_id_t id)
 
 void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &val)
 {
-        DBG("Forwarding message to P{}\n", dest->client_id);
+        DBG("Forwarding message '{}' to P{}\n", val, dest->client_id);
 
         std::string payload = paxos_msg::encode_msg({.type = paxos_msg::FWD_VAL, .fwd = val});
 

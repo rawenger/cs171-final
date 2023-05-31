@@ -37,7 +37,7 @@ auto parse_input(const std::string &text) -> std::optional<input>
             if (args.size() != 1) {
                 return maybe_input;
             }
-            auto pid = parse_pid(args.at(0));
+            auto pid = parse_pid(args[0]);
             if (not pid.has_value()) {
                 return maybe_input;
             }
@@ -51,12 +51,31 @@ auto parse_input(const std::string &text) -> std::optional<input>
             if (args.size() != 1) {
                 return maybe_input;
             }
-            auto pid = parse_pid(args.at(0));
+            auto pid = parse_pid(args[0]);
             if (not pid.has_value()) {
                 return maybe_input;
             }
             input.fix_link = {
                 .dest = pid.value(),
+            };
+            break;
+        }
+
+        case input::KIND::TRANSACTION: {
+            // example use: 'transfer(P1, 3)' to transfer P1 $3
+            if (args.size() != 2) {
+                    return maybe_input;
+            }
+            // @jackson: don't need bounds checking ::at() since we just checked in the `if` above
+            auto dest = parse_pid(args[0]);
+            if (!dest) {
+                    return maybe_input;
+            }
+            // obviously atoi() is only here since we won't be using this in the final product
+            uint16_t amt = atoi(args[1].c_str()); //NOLINT(cert-err34-c)
+            input.transaction = {
+                    .dest = *dest,
+                    .amt = amt
             };
             break;
         }
@@ -131,6 +150,8 @@ static auto parse_name(const std::string &text) -> std::optional<input::KIND>
         kind = input::KIND::QUEUE;
     } else if (text == "log") {
         kind = input::KIND::LOG;
+    } else if (text == "transfer") {
+            kind = input::KIND::TRANSACTION;
     }
 
     return kind;

@@ -23,52 +23,8 @@
 #include "paxos_node.h"
 #include "cli_interface.h"
 
-struct exit_t {};
-using wait_t = std::chrono::seconds;
-
-// TODO: Horrible legacy parse sum type.
-struct balance_req_t { uint16_t client; uint16_t unused; };
-struct request_t {
-    enum : uint8_t {
-        INVALID_REQUEST,
-        BAL_REQUEST,
-        TR_REQUEST
-    } type;
-
-    union {
-        balance_req_t bal;
-        transaction tr;
-    };
-};
-
-using cmd_t = std::variant<request_t, exit_t, wait_t>;
-
 static node_id_t my_id;
 static std::string my_hostname;
-
-static cmd_t parse_cmd(std::string_view &&msg);
-
-// TODO: requires fmtlib 10.0, which has not been packaged by homebrew yet.
-//  but this speeds up compilation times by a bit since less templates.
-//std::string format_as(request_t req)
-//{
-//        return (req.type == request_t::BAL_REQUEST
-//                 ? fmt::format("BALANCE {{.client = {}}}",
-//                               (uint16_t) req.bal.client)
-//                 : fmt::format("TRANSFER {{.recv = {}, .amt = {}}}",
-//                               (uint16_t) req.tr.recv, (uint16_t) req.tr.amt));
-//}
-
-//struct test_serial {
-//        size_t sn;
-//        size_t pn;
-//        uint8_t plbl;
-//};
-//
-//std::string format_as(test_serial req)
-//{
-//        return fmt::format("{{{}, {}, {}}}", req.sn, req.pn, req.plbl);
-//}
 
 int main(int argc, char **argv)
 {
@@ -78,14 +34,14 @@ int main(int argc, char **argv)
         }
 
         if (argv[1][0] == 'P')
-                my_id = atoi(argv[1]+1);
+                my_id = atoi(argv[1]+1); //NOLINT(cert-err34-c)
         else
-                my_id = atoi(argv[1]);
+                my_id = atoi(argv[1]); //NOLINT(cert-err34-c)
 
         /* Constructing this object will open and parse the config.csv file */
-        cs171_cfg::system_cfg config{};
+        cs171_cfg::system_cfg config {};
 
-        paxos_node node{config, my_id, my_hostname};
+        paxos_node node {config, my_id, my_hostname};
 
         while (true) {
                 std::string in;
@@ -129,7 +85,10 @@ int main(int argc, char **argv)
                         break;
                     }
                     case input::KIND::TRANSACTION: {
-                        // STUB
+                        auto [dest, amt] = cmd->transaction;
+                        cs171_cfg::node_id_t sender = node.id();
+
+                        node.propose({amt, sender, dest});
                         break;
                     }
                     case input::KIND::BLOCKCHAIN:
@@ -210,6 +169,7 @@ cs171_cfg::system_cfg::system_cfg()
 //        DBG("accept_from: [{}]\n", fmt::join(accept_from, ", "));
 }
 
+#if 0
 /* This is disgusting. I hate string parsing.
  * This whole thing is way more repetitive than any of it has any right
  * to be; terrible spaghetti code.
@@ -293,3 +253,4 @@ static cmd_t parse_cmd(std::string_view &&msg)
         };
         return res;
 }
+#endif

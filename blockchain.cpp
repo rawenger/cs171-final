@@ -2,17 +2,20 @@
 // Created by ryan on 4/8/23.
 //
 
-//#include <openssl/evp.h>
+#include <openssl/evp.h>
 #include <cassert>
 #include <iterator>
 #include <vector>
 #include <map>
 
 #include "debug.h"
+
+// we use a different transaction formatter here
+#define DISABLE_TRANSACTION_FORMAT_AS
 #include "blockchain.h"
 
 blockchain blockchain::BLOCKCHAIN;
-//static EVP_MD_CTX *sha256_ctx;
+static EVP_MD_CTX *sha256_ctx;
 
 template<>
 struct fmt::formatter<transaction> {
@@ -48,7 +51,8 @@ struct fmt::formatter<blockchain::block> {
 
     template <typename FormatContext>
     auto format(const blockchain::block &blk, FormatContext &ctx) const -> decltype(ctx.out()) {
-            return fmt::format_to(ctx.out(), "({:f}, {})", blk.T, blk.H);
+//            return fmt::format_to(ctx.out(), "({:f}, {})", blk.T, blk.H);
+            return fmt::format_to(ctx.out(), "({}, {})", blk.T, blk.H);
     }
 };
 
@@ -102,27 +106,28 @@ void blockchain::block::hash(u256 &out)
          *      into the SHA-256 algorithm
          */
         uint32_t sha_size = 32;
-        std::string sha_in = fmt::format("{}{:e}{}", H, T, N);
-//        EVP_DigestInit_ex2(sha256_ctx, nullptr, nullptr);
+//        std::string sha_in = fmt::format("{}{:e}{}", H, T, N);
+        std::string sha_in = fmt::format("{}{}{}", H, T, N);
+        EVP_DigestInit_ex2(sha256_ctx, nullptr, nullptr);
 //        DBG("H: {}, ", H);
 //        DBG("T: {:e}, ", T);
 //        DBG("N: {}\n", N);
 //        DBG("SHA-256 input: {}\n", sha_in);
-//        EVP_DigestUpdate(sha256_ctx, sha_in.c_str(), sha_in.length());
-//        EVP_DigestFinal_ex(sha256_ctx, out.data(), &sha_size);
+        EVP_DigestUpdate(sha256_ctx, sha_in.c_str(), sha_in.length());
+        EVP_DigestFinal_ex(sha256_ctx, out.data(), &sha_size);
         assert(sha_size == 32);
-	out[0] = 0;
+//	out[0] = 0;rm
 }
 
 blockchain::blockchain()
 {
-//        sha256_ctx = EVP_MD_CTX_create();
-//        EVP_DigestInit_ex(sha256_ctx, EVP_sha256(), nullptr);
+        sha256_ctx = EVP_MD_CTX_create();
+        EVP_DigestInit_ex(sha256_ctx, EVP_sha256(), nullptr);
 }
 
 blockchain::~blockchain()
 {
-//        EVP_MD_CTX_destroy(sha256_ctx);
+        EVP_MD_CTX_destroy(sha256_ctx);
         delete tail;
 }
 

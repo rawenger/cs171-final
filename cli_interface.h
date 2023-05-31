@@ -27,6 +27,7 @@ struct input {
         struct {} crash;
         struct {pid dest;} fail_link;
         struct {pid dest;} fix_link;
+        struct {pid dest; uint16_t amt;} transaction;
         struct {} blockchain;
         struct {} queue;
         struct {} log;

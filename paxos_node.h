@@ -120,8 +120,11 @@ class paxos_node {
 public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
     void propose(paxos_msg::V value);
+
+    cs171_cfg::node_id_t id() const { return my_id; } //NOLINT(modernize-use-nodiscard)
+
     bool fail_link(cs171_cfg::node_id_t peer);
     bool fix_link(cs171_cfg::node_id_t peer);
     std::string dump_op_queue() /* const */;
-    std::string dump_log() const;
+    std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
 };

@@ -24,6 +24,14 @@ struct transaction {
     void serialize(Archive &ar) { ar(amt, sender, receiver); }
 };
 
+// blockchain.cpp uses its own custom transaction formatter
+#ifndef DISABLE_TRANSACTION_FORMAT_AS
+inline std::string format_as(transaction tr)
+{
+        return fmt::format("P{} -${}-> P{}", tr.sender, tr.receiver, tr.amt);
+}
+#endif
+
 class blockchain {
     struct block {
         explicit block(transaction t, block *prev=nullptr);
