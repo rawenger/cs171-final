@@ -11,7 +11,8 @@
 #include <type_traits>
 
 template <typename T>
-concept FS_BUF_T = std::is_trivially_copyable_v<T>;
+concept FS_BUF_T = std::is_trivially_copyable_v<T>
+        && std::is_nothrow_default_constructible_v<T>;
 /**
  * Filesystem-backed dynamically resizable storage.
  */
@@ -38,11 +39,12 @@ private:
     static constexpr char dummydata = '\0';
     static constexpr size_t T_size = sizeof(T);
 
-    off_t bufsize {0}; // actual size of file/number of elements in vector
+    size_t bufsize {0}; // actual size of backing file in bytes
 
     T *buf {nullptr};
     int backing_fd {-1};
 
+    // assumes that caller has already verified newsize > bufsize
     void grow_to(size_t newsize);
 };
 
