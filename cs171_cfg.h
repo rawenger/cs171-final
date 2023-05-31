@@ -63,5 +63,6 @@ namespace cs171_cfg {
         node_id_t arbitrator;
 
         system_cfg();
+        system_cfg(const system_cfg& other) = default;
     };
 };

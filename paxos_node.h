@@ -61,6 +61,7 @@ class paxos_node {
     std::atomic_flag update_pfds {false};
     size_t n_peers;
 
+    cs171_cfg::system_cfg config;
     node_id_t my_id;
     std::string my_hostname;
     int my_port;
@@ -116,6 +117,7 @@ class paxos_node {
     cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 
     bool has_connection_to(cs171_cfg::node_id_t id);
+    bool connect_to(const decltype(config.peers)::value_type &peer);
 
 public:
     paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
@@ -123,8 +125,8 @@ public:
 
     cs171_cfg::node_id_t id() const { return my_id; } //NOLINT(modernize-use-nodiscard)
 
-    bool fail_link(cs171_cfg::node_id_t peer);
-    bool fix_link(cs171_cfg::node_id_t peer);
+    bool fail_link(cs171_cfg::node_id_t peer_id);
+    bool fix_link(cs171_cfg::node_id_t peer_id);
     std::string dump_op_queue() /* const */;
     std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
 };

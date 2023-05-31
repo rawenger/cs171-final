@@ -135,6 +135,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
 paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname)
 :       my_id(my_id),
         my_hostname(std::move(node_hostname)),
+        config(config),
         my_port(config.my_port),
         n_peers(config.n_peers),
         balnum(0, my_id, 1),
@@ -145,40 +146,8 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
         std::thread{&paxos_node::listen_connections, this}.detach();
 
-        for (const auto &[id, port, hostname] : config.peers) {
-                if (id == my_id || has_connection_to(id))
-                        continue;
-
-                auto addr = hostname_lookup(hostname, port);
-                socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
-                pmut.lock(); // make sure that we are allowed to make a new outgoing connection
-                if (connect(sock, addr.get(), sizeof(sockaddr_in)) < 0) {
-                        close(sock);
-                        pmut.unlock();
-                        continue;
-                }
-                new_peer(sock, id); // need this up here so listener thread can learn of duplicates
-                pmut.unlock();
-
-                fmt::print("Connected to peer P{}\n", id);
-
-                if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
-                        perror("Unable to send PID to new peer");
-                        exit(EXIT_FAILURE);
-                }
-
-                paxos_msg::MSG_TYPE handshake;
-                if (recv(sock, &handshake, sizeof handshake, 0) < 0) {
-                        perror("Unable to recv connection handshake status");
-                        exit(EXIT_FAILURE);
-                }
-
-                // the peer we've just connected to informs us we already have an existing connection to them
-                if (handshake == paxos_msg::DUPLICATE) {
-                        pmut.lock();
-                        peers.erase(sock);
-                        pmut.unlock();
-                }
+        for (const auto &peer : config.peers) {
+                connect_to(peer);
         }
 
         my_state = PREPARER;
@@ -229,16 +198,24 @@ void paxos_node::propose(paxos_msg::V value)
         }}.detach();
 }
 
-bool paxos_node::fail_link(cs171_cfg::node_id_t peer)
+bool paxos_node::fail_link(cs171_cfg::node_id_t peer_id)
 {
-        fmt::print("fail_link() STUB\n");
-        return true;
+        std::lock_guard<decltype(pmut)> lk{pmut};
+        return std::erase_if(peers, [peer_id] (auto &&peer) {
+                return peer.second->client_id == peer_id;
+        }) > 0;
 }
 
-bool paxos_node::fix_link(cs171_cfg::node_id_t peer)
+bool paxos_node::fix_link(cs171_cfg::node_id_t peer_id)
 {
-        fmt::print("fix_link() STUB\n");
-        return true;
+        auto target =
+                std::find_if(config.peers.cbegin(), config.peers.cend(),
+                             [peer_id] (const auto &p) {return std::get<1>(p) == peer_id;});
+
+        if (target == config.peers.cend())
+                return false;
+
+        return connect_to(*target);
 }
 
 std::string paxos_node::dump_op_queue() /* const */
@@ -733,4 +710,45 @@ void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &va
                                    payload.length(),
                                    0,
                                    "Unable to forward message to leader");
+}
+
+bool paxos_node::connect_to(const decltype(config.peers)::value_type &peer)
+{
+        const auto &[id, port, hostname] = peer;
+        if (id == my_id || has_connection_to(id))
+                return false;
+
+        auto addr = hostname_lookup(hostname, port);
+        socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+        pmut.lock(); // make sure that we are allowed to make a new outgoing connection
+        if (connect(sock, addr.get(), sizeof(sockaddr_in)) < 0) {
+                close(sock);
+                pmut.unlock();
+                return false;
+        }
+        new_peer(sock, id); // need this up here so listener thread can learn of duplicates
+        pmut.unlock();
+
+        fmt::print("Connected to peer P{}\n", id);
+
+        if (cs171_cfg::send_with_delay<false>(sock, &my_id, sizeof my_id, 0) < 0) {
+                perror("Unable to send PID to new peer");
+                exit(EXIT_FAILURE);
+        }
+
+        paxos_msg::MSG_TYPE handshake;
+        if (recv(sock, &handshake, sizeof handshake, 0) < 0) {
+                perror("Unable to recv connection handshake status");
+                exit(EXIT_FAILURE);
+        }
+
+        // the peer we've just connected to informs us we already have an existing connection to them
+        if (handshake == paxos_msg::DUPLICATE) {
+                pmut.lock();
+                peers.erase(sock);
+                pmut.unlock();
+                return false;
+        }
+
+        return true;
 }
