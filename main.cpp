@@ -26,6 +26,8 @@
 static node_id_t my_id;
 static std::string my_hostname;
 
+cs171_cfg::system_cfg *config {nullptr};
+
 int main(int argc, char **argv)
 {
         if (argc < 2) {
@@ -39,9 +41,9 @@ int main(int argc, char **argv)
                 my_id = atoi(argv[1]); //NOLINT(cert-err34-c)
 
         /* Constructing this object will open and parse the config.csv file */
-        cs171_cfg::system_cfg config {};
+        config = new cs171_cfg::system_cfg {};
 
-        paxos_node node {config, my_id, my_hostname};
+        paxos_node node{my_id, my_hostname};
 
         while (true) {
                 std::string in;
@@ -119,7 +121,6 @@ cs171_cfg::system_cfg::system_cfg()
         }
 
         n_peers = 0;
-        arbitrator = -1;
 
         while (!in.eof()) {
                 if (in.peek() == '#') {
@@ -147,9 +148,6 @@ cs171_cfg::system_cfg::system_cfg()
                 } else {
                         ++n_peers;
                 }
-
-                if (id < arbitrator)
-                        arbitrator = id;
 
                 DBG("{{id: {}, host: {}, port: {}}}\n",
                     id, hostname, port);

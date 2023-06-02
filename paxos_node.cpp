@@ -30,6 +30,8 @@
 #include "sema_q.h"
 #include "debug.h"
 
+extern cs171_cfg::system_cfg *config;
+
 template<>
 struct fmt::formatter<paxos_msg::ballot_num> {
     constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
@@ -39,7 +41,7 @@ struct fmt::formatter<paxos_msg::ballot_num> {
     template<typename FormatContext>
     auto format(const paxos_msg::ballot_num &ballot, FormatContext &ctx) const -> decltype(ctx.out()) {
             // ctx.out() is an output iterator to write to.
-            return fmt::format_to(ctx.out(), "({})",
+            return fmt::format_to(ctx.out(), "({}, {}, {})",
                                   ballot.seq_num, ballot.node_pid, ballot.slot_num);
     }
 };
@@ -99,7 +101,9 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
 
                 // remove peers who've closed their connection
                 std::erase_if(client_fds, [me] (const pollfd &pfd) {
-                        if (pfd.revents & SOCK_REVENT_CLOSE) {
+                        if (pfd.revents & SOCK_REVENT_CLOSE
+                            || pfd.revents & POLLNVAL)
+                        {
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd)->client_id);
                                 auto lead = me->leader.load();
@@ -111,6 +115,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                                 me->pmut.lock();
                                 me->peers.erase(pfd.fd);
                                 me->pmut.unlock();
+                                me->update_pfds.test_and_set();
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
@@ -148,12 +153,11 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
  *      - P2 recieves num_peers from P1
  *      - P2 receives peers_up from P1
  */
-paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname)
+paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
 :       my_id(my_id),
         my_hostname(std::move(node_hostname)),
-        config(config),
-        my_port(config.my_port),
-        n_peers(config.n_peers),
+        my_port(config->my_port),
+        n_peers(config->n_peers),
         balnum(0, my_id, 1),
         accept_bals(my_id, "bals"),
         accept_vals(my_id, "vals")
@@ -162,7 +166,7 @@ paxos_node::paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std
 
         std::thread{&paxos_node::listen_connections, this}.detach();
 
-        for (const auto &peer : config.peers) {
+        for (const auto &peer : config->peers) {
                 connect_to(peer);
         }
 
@@ -217,18 +221,29 @@ void paxos_node::propose(paxos_msg::V value)
 bool paxos_node::fail_link(cs171_cfg::node_id_t peer_id)
 {
         std::lock_guard<decltype(pmut)> lk{pmut};
-        return std::erase_if(peers, [peer_id] (auto &&peer) {
-                return peer.second->client_id == peer_id;
-        }) > 0;
+
+        const peer_connection *lead = leader.load();
+
+        if (lead && peer_id == lead->client_id)
+                set_leader(nullptr);
+
+        for (auto &&peer : peers) {
+                if (peer.second->client_id == peer_id) {
+                        peer.second->disconnect();
+                        return true;
+                }
+        }
+
+        return false;
 }
 
 bool paxos_node::fix_link(cs171_cfg::node_id_t peer_id)
 {
         auto target =
-                std::find_if(config.peers.cbegin(), config.peers.cend(),
-                             [peer_id] (const auto &p) {return std::get<1>(p) == peer_id;});
+                std::find_if(config->peers.cbegin(), config->peers.cend(),
+                             [peer_id] (const auto &p) {return std::get<node_id_t>(p) == peer_id;});
 
-        if (target == config.peers.cend())
+        if (target == config->peers.cend())
                 return false;
 
         return connect_to(*target);
@@ -522,10 +537,12 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
 }
 
 // TODO: also print who sent the decide
-void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
+void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision)
 {
         // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-        say(fmt::format("Received DECIDE with value {}.", decision));
+        say(fmt::format("Received DECIDE from P{} with value {}.", peer_id_of(sender), decision));
+
+        set_leader(peers[sender].get());
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
         //  recover from. I don't believe this is part of the spec though.
@@ -547,11 +564,11 @@ void paxos_node::receive_decide(const paxos_msg::decide_msg &decision)
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
 {
-        pmut.lock();
+        pmut_guard lk {pmut};
+
         DBG("Received {} message from peer P{}\n",
             paxos_msg::msg_types[m.type],
             peers.at(sender)->client_id);
-        pmut.unlock();
 
         switch (m.type) {
             case paxos_msg::PREPARE: {
@@ -575,10 +592,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             }
 
             case paxos_msg::DECIDE: {
-                pmut.lock();
-                set_leader(peers[sender].get());
-                pmut.unlock();
-                receive_decide(m.dec);
+                receive_decide(sender, m.dec);
                 break;
             }
 
@@ -685,7 +699,6 @@ void paxos_node::say(std::string &&message) const
                 << std::endl;
 }
 
-
 cs171_cfg::node_id_t paxos_node::peer_id_of(cs171_cfg::socket_t peer)
 {
         std::lock_guard<decltype(pmut)> lk{pmut};
@@ -708,7 +721,8 @@ void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &va
 {
         DBG("Forwarding message '{}' to P{}\n", val, dest->client_id);
 
-        std::string payload = paxos_msg::encode_msg({.type = paxos_msg::FWD_VAL, .fwd = val});
+        paxos_msg::msg m = {.type = paxos_msg::FWD_VAL, .fwd = val};
+        std::string payload = paxos_msg::encode_msg(m);
 
         cs171_cfg::send_with_delay(dest->sock,
                                    payload.c_str(),
@@ -717,7 +731,7 @@ void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &va
                                    "Unable to forward message to leader");
 }
 
-bool paxos_node::connect_to(const decltype(config.peers)::value_type &peer)
+bool paxos_node::connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_type &peer)
 {
         const auto &[id, port, hostname] = peer;
         if (id == my_id || has_connection_to(id))

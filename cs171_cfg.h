@@ -10,7 +10,7 @@
 namespace cs171_cfg {
     using namespace std::chrono_literals;
     constexpr const char *CLIENT_CFG = "clients.csv";
-    constexpr auto NETWORK_DELAY = 3s;
+    constexpr auto NETWORK_DELAY = 0s;
 
     /** `err_msg` must be a string literal! */
     template <bool Async=true>
@@ -21,6 +21,7 @@ namespace cs171_cfg {
                             const char *err_msg="")
     {
             constexpr bool execute_async = Async && (NETWORK_DELAY > 0s);
+            auto wake_time = std::chrono::system_clock::now() + NETWORK_DELAY;
 
             const uint8_t *bufcpy;
 
@@ -33,7 +34,7 @@ namespace cs171_cfg {
             }
 
             auto sender = [=]() -> ssize_t {
-                    std::this_thread::sleep_for(NETWORK_DELAY);
+                    std::this_thread::sleep_until(wake_time);
                     ssize_t result = send(socket, bufcpy, length, flags);
                     if (result < 0)
                             perror(err_msg);
@@ -60,7 +61,6 @@ namespace cs171_cfg {
         std::vector<client_tuple> peers;
         size_t n_peers;
         int my_port;
-        node_id_t arbitrator;
 
         system_cfg();
         system_cfg(const system_cfg& other) = default;

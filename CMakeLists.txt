@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(cs171_final)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_COMPILER g++)
+set(CMAKE_CXX_COMPILER g++-12)
 
 set(EXECUTABLES cs171_final)
 
@@ -23,11 +23,18 @@ endif()
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -O0")
     if (${CMAKE_HOST_LINUX})
+        execute_process(
+            COMMAND hostname
+            OUTPUT_VARIABLE HOSTNAME
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread,undefined")
     endif()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -O2")
 endif()
+
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCSIL=1")
 
 find_package(OpenSSL REQUIRED)
 target_link_libraries(cs171_final OpenSSL::SSL)

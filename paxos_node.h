@@ -8,7 +8,6 @@
 #include <future>
 #include <boost/lockfree/queue.hpp>
 
-//#include "peer_connection.h"
 #include "paxos_msg.h"
 #include "blockchain.h"
 #include "sema_q.h"
@@ -31,7 +30,10 @@ struct peer_connection {
     peer_connection(const peer_connection &other) = delete;
     peer_connection &operator=(const peer_connection &other) = delete;
 
-    ~peer_connection() { shutdown(sock, SHUT_RDWR); close(sock); }
+    void disconnect()
+    { shutdown(sock, SHUT_RDWR); close(sock); }
+
+    ~peer_connection() { disconnect(); }
 
 //    void send(timestamp_t time, decltype(peer_msg::type) type) const;
 
@@ -57,11 +59,13 @@ class paxos_node {
     static void polling_loop(std::stop_token stoken, paxos_node *me);
 
     std::recursive_mutex pmut;
+    using pmut_guard = std::lock_guard<decltype(pmut)>;
+
     std::map<socket_t, peer_ptr> peers;
     std::atomic_flag update_pfds {false};
     size_t n_peers;
 
-    cs171_cfg::system_cfg config;
+//    const cs171_cfg::system_cfg config;
     node_id_t my_id;
     std::string my_hostname;
     int my_port;
@@ -101,7 +105,7 @@ class paxos_node {
 
     void receive_accept(socket_t proposer, const paxos_msg::accept_msg &accept);
 
-    void receive_decide(const paxos_msg::decide_msg &decision);
+    void receive_decide(socket_t sender, const paxos_msg::decide_msg &decision);
 
     std::vector<cs171_cfg::socket_t>
     receive_promises(TimePoint timeout_time, paxos_msg::V &propval);
@@ -117,10 +121,10 @@ class paxos_node {
     cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 
     bool has_connection_to(cs171_cfg::node_id_t id);
-    bool connect_to(const decltype(config.peers)::value_type &peer);
+    bool connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_type &peer);
 
 public:
-    paxos_node(const cs171_cfg::system_cfg &config, node_id_t my_id, std::string node_hostname);
+    paxos_node(node_id_t my_id, std::string node_hostname);
     void propose(paxos_msg::V value);
 
     cs171_cfg::node_id_t id() const { return my_id; } //NOLINT(modernize-use-nodiscard)
