@@ -29,9 +29,8 @@ auto parse_input(const std::string &text) -> std::optional<input>
         case input::KIND::CRASH:
         case input::KIND::BLOCKCHAIN:
         case input::KIND::QUEUE:
-        case input::KIND::LOG: {
+        case input::KIND::LOG:
             break;
-        }
 
         case input::KIND::FAIL_LINK: {
             if (args.size() != 1) {

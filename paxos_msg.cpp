@@ -9,6 +9,8 @@
 #include <cereal/types/tuple.hpp>
 #include <sstream>
 
+#include <fmt/core.h>
+
 #include "paxos_msg.h"
 
 std::string paxos_msg::encode_msg(paxos_msg::msg m)
@@ -38,4 +40,17 @@ paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
         }
 
         return res;
+}
+
+//std::string format_as(paxos_msg::ballot_num ballot)
+//{
+//        return fmt::format("({}, {}, {})",
+//                           ballot.seq_num,
+//                           ballot.node_pid,
+//                           ballot.slot_num);
+//}
+
+std::string format_as(std::optional<paxos_msg::V> optval)
+{
+        return optval ? fmt::format("{}", *optval) : "bottom";
 }

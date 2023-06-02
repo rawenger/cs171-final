@@ -8,8 +8,6 @@
 #include <mutex>
 #include <array>
 
-#include <fmt/core.h>
-
 using u256 = std::array<uint8_t, 32>;
 
 /* This was designed before we had to do all the string conversions
@@ -25,12 +23,9 @@ struct transaction {
 };
 
 // blockchain.cpp uses its own custom transaction formatter
-#ifndef DISABLE_TRANSACTION_FORMAT_AS
-inline std::string format_as(transaction tr)
-{
-        return fmt::format("P{} -${}-> P{}", tr.sender, tr.receiver, tr.amt);
-}
-#endif
+//#ifndef DISABLE_TRANSACTION_FORMAT_AS
+std::string format_as(transaction tr);
+//#endif
 
 class blockchain {
     struct block {
@@ -44,7 +39,8 @@ class blockchain {
         uint64_t N;
         transaction T;
     };
-    friend struct fmt::formatter<blockchain::block>;
+
+    friend std::string format_as(const blockchain::block &blk);
 
     block *tail{nullptr};
     std::recursive_mutex mut{};

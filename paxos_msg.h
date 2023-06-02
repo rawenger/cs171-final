@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <tuple>
 #include <optional>
+#include <cassert>
+
 
 //#include "cs171_cfg.h"
 #include "blockchain.h"
@@ -43,53 +45,55 @@ namespace paxos_msg {
     };
 
     struct ballot_num {
-        size_t number;
+        size_t seq_num; // sequence number
         uint8_t node_pid;
-        size_t slot_number;
+        size_t slot_num;
 
         ballot_num(size_t number, uint8_t nodePid, size_t slotNumber)
-        : number(number), node_pid(nodePid), slot_number(slotNumber)
+        : seq_num(number), node_pid(nodePid), slot_num(slotNumber)
         { }
 
         ballot_num() = default;
 
         template <class Archive>
         void serialize(Archive &ar)
-        { ar(number), ar(node_pid), ar(slot_number); }
+        { ar(seq_num), ar(node_pid), ar(slot_num); }
 
         // TODO: relational operators IDE-generated....look over these later
         bool operator==(const ballot_num &rhs) const {
-                return number == rhs.number &&
+                return seq_num == rhs.seq_num &&
                        node_pid == rhs.node_pid &&
-                       slot_number == rhs.slot_number;
-        }
-
-        bool operator<(const ballot_num &rhs) const {
-                if (number < rhs.number)
-                        return true;
-                if (rhs.number < number)
-                        return false;
-                if (node_pid < rhs.node_pid)
-                        return true;
-                if (rhs.node_pid < node_pid)
-                        return false;
-                return slot_number < rhs.slot_number;
-        }
-
-        bool operator!=(const ballot_num &rhs) const {
-                return !(rhs == *this);
-        }
-
-        bool operator>(const ballot_num &rhs) const {
-                return rhs < *this;
+                       slot_num == rhs.slot_num;
         }
 
         bool operator<=(const ballot_num &rhs) const {
-                return !(rhs < *this);
+                if (slot_num < rhs.slot_num)
+                        return true;
+                if (slot_num > rhs.slot_num)
+                        return false;
+                if (seq_num < rhs.seq_num)
+                        return true;
+                if (seq_num > rhs.seq_num)
+                        return false;
+                if (node_pid < rhs.node_pid)
+                        return true;
+                if (node_pid > rhs.node_pid)
+                        return false;
+
+                assert(*this == rhs);
+                return true; // *this == rhs
+        }
+
+        bool operator<(const ballot_num &rhs) const {
+                return !(rhs <= *this);
+        }
+
+        bool operator>(const ballot_num &rhs) const {
+                return !(*this <= rhs);
         }
 
         bool operator>=(const ballot_num &rhs) const {
-                return !(*this < rhs);
+                return rhs <= *this;
         }
     };
 
@@ -148,3 +152,7 @@ namespace paxos_msg {
     std::string encode_msg(msg m);
     msg decode_msg(const std::string &data);
 }
+
+//std::string format_as(paxos_msg::ballot_num ballot);
+
+std::string format_as(std::optional<paxos_msg::V> optval);
