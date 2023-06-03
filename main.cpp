@@ -23,7 +23,7 @@
 #include "paxos_node.h"
 #include "cli_interface.h"
 
-static node_id_t my_id;
+node_id_t my_id;
 static std::string my_hostname;
 
 cs171_cfg::system_cfg *config {nullptr};

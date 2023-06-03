@@ -22,7 +22,7 @@ static size_t round_to_pagesize(size_t s)
 }
 
 template<FS_BUF_T T>
-fs_buf<T>::fs_buf(uint8_t my_id, const char *file_label)
+fs_buf<T>::fs_buf(cs171_cfg::node_id_t my_id, const char *file_label)
 {
         namespace fs = std::filesystem;
         auto filepath = fs::path{"./ramfs"} / (std::to_string(my_id) + file_label);
@@ -98,6 +98,7 @@ fs_buf<T>::fs_buf(fs_buf &&other) noexcept
         other.backing_fd = -1;
 }
 
+// TODO: default construct newly added elements
 template<FS_BUF_T T>
 void fs_buf<T>::grow_to(size_t newsize)
 {

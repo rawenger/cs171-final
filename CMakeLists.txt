@@ -28,7 +28,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
             OUTPUT_VARIABLE HOSTNAME
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread,undefined")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")# -fsanitize=thread,undefined")
     endif()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -O2")

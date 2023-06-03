@@ -91,6 +91,11 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
 
                 int n_events = poll(client_fds.data(), client_fds.size(), 5000);
 
+                // Do not handle poll events if we've "crashed."
+                if (stoken.stop_requested()) {
+                        break;
+                }
+
                 if (n_events < 0) {
                         perror("Unable to poll client sockets");
                         return;
@@ -158,11 +163,12 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
         my_hostname(std::move(node_hostname)),
         my_port(config->my_port),
         n_peers(config->n_peers),
-        balnum(0, my_id, 1),
+        balnum(my_id, "num"),
         accept_bals(my_id, "bals"),
-        accept_vals(my_id, "vals")
+        accept_vals(my_id, "vals"),
+        log(my_id, "log")
 {
-        accept_bals[1] = balnum;
+        accept_bals[1] = *balnum;
 
         std::thread{&paxos_node::listen_connections, this}.detach();
 
@@ -178,22 +184,24 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
 void paxos_node::propose(paxos_msg::V value)
 {
         DBG("Proposing {}\n", value);
-        if (!request_q.bounded_push(value)) {
-                DBG("uh-oh, push failed oopsie\n");
-                exit(EXIT_FAILURE);
-        }
+        req_q_mut.lock();
+        request_q.push(value);
+        req_q_mut.unlock();
 
         // TODO: do we need to put the operation back on the queue if we don't reach a DECIDE on it?
         std::thread{[this] () -> void {
+                while (!request_q.empty())
                 // wait till the previous operation is done
                 std::lock_guard<decltype(propose_mut)> lk1{propose_mut};
 
                 std::vector<cs171_cfg::socket_t> accept_targets{};
                 paxos_msg::V value;
-                if (!request_q.pop(value)) {
-                        DBG("ub-oh #2, pop failed\n");
-                        exit(EXIT_FAILURE);
-                }
+                // NOTE: don't have to lock since we are the only ones dequeueing
+                // actually we do because it's backed by std::vector and we're
+                // changing the size of the vector
+                req_q_mut.lock();
+                value = request_q.front();
+                req_q_mut.unlock();
 
                 // TODO: jackson pls double check this logic
                 auto lead = leader.load();
@@ -213,6 +221,9 @@ void paxos_node::propose(paxos_msg::V value)
                 }
 
                 if (!accept_targets.empty() && broadcast_accept(value, accept_targets)) {
+                        req_q_mut.lock();
+                        request_q.pop();
+                        req_q_mut.unlock();
                         broadcast_decision(value);
                 }
         }}.detach();
@@ -257,9 +268,12 @@ std::string paxos_node::dump_op_queue() /* const */
         return "dump_op_queue() STUB";
 }
 
-std::string paxos_node::dump_log() const
+std::string paxos_node::dump_log()
 {
-        return "dump_log() STUB";
+        // TODO: implement an iterator for fs_buf so this can be re-marked const
+        for (size_t slot = 1; slot < balnum->slot_num; ++slot) {
+                fmt::print("#{:2}: {}\n", slot, log[slot]);
+        }
 }
 
 /************************************************************************************
@@ -269,10 +283,10 @@ std::string paxos_node::dump_log() const
 std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &value)
 {
         // Increment the sequence number of our ballot. This is a fresh proposal.
-        balnum.seq_num += 1;
-        balnum.node_pid = my_id;
+        balnum->seq_num += 1;
+        balnum->node_pid = my_id;
 
-        paxos_msg::prepare_msg prepare = balnum;
+        paxos_msg::prepare_msg prepare = *balnum;
 
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::PREPARE,
@@ -305,7 +319,7 @@ bool paxos_node::broadcast_accept(
         const std::vector<cs171_cfg::socket_t> &targets)
 {
         paxos_msg::accept_msg accept = {
-                .balnum = balnum,
+                .balnum = *balnum,
                 .value = value,
         };
 
@@ -343,7 +357,7 @@ void paxos_node::broadcast_decision(const paxos_msg::V &value)
 {
         paxos_msg::msg msg = {
                 .type = paxos_msg::MSG_TYPE::DECIDE,
-                .dec = value,
+                .dec = {value, balnum->slot_num},
         };
 
         auto payload = paxos_msg::encode_msg(msg);
@@ -366,10 +380,14 @@ void paxos_node::broadcast_decision(const paxos_msg::V &value)
 
         pmut.unlock();
 
-        // TODO: Proposer must write to log.
+        // Proposer commits.
+        // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
+        //  recover from. I don't believe this is part of the spec though.
+
+        log[balnum->slot_num] = value;
         blockchain::BLOCKCHAIN.transfer(value);
 
-        balnum.slot_num += 1;
+        balnum->slot_num += 1;
 }
 
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
@@ -384,8 +402,8 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
 
         // TODO: Not sure when it would be the case that the two are equal, even though we're
         //  defining the relation on less than or equal to.
-        if (balnum <= proposal) {
-                balnum = proposal;
+        if (*balnum <= proposal) {
+                *balnum = proposal;
 
                 paxos_msg::promise_msg promise = {
                         .balnum = proposal,
@@ -454,7 +472,7 @@ paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval
 
                 // Only if the node is promising to join our most recent ballot. Otherwise, it's
                 // an old promise.
-                if (balnum == promise.balnum) {
+                if (*balnum == promise.balnum) {
                         n_responses += 1;
                         retvec.push_back(sender);
                         if (promise.acceptval.has_value()) {
@@ -497,7 +515,7 @@ bool paxos_node::receive_accepteds(const TimePoint timeout_time)
                                 peer_id_of(sender),
                                 msg));
 
-                n_responses += (balnum == msg);
+                n_responses += (*balnum == msg);
         }
 
         return true;
@@ -510,7 +528,7 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                         peer_id_of(proposer),
                         accept.balnum));
 
-        if (balnum <= accept.balnum) {
+        if (*balnum <= accept.balnum) {
                 accept_bals[accept.balnum.slot_num] = accept.balnum;
                 accept_vals[accept.balnum.slot_num] = accept.value;
 
@@ -536,18 +554,17 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
         }
 }
 
-// TODO: also print who sent the decide
-void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision)
-{
-        // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
-        say(fmt::format("Received DECIDE from P{} with value {}.", peer_id_of(sender), decision));
+void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision) {
+        say(fmt::format("Received DECIDE from P{} for slot {} with value {}.",
+                        peer_id_of(sender), decision.val, decision.slotnum));
 
         set_leader(peers[sender].get());
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
         //  recover from. I don't believe this is part of the spec though.
 
-        bool success = blockchain::BLOCKCHAIN.transfer(decision);
+        log[balnum->slot_num] = decision.val;
+        bool success = blockchain::BLOCKCHAIN.transfer(decision.val);
 
         if (success) {
                 fmt::print("Success!\n");
@@ -557,9 +574,22 @@ void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &de
 
         // Increase the slot number of our ballot number, which corresponds to the depth of
         // our blockchain. We have decided this slot number, and so our next proposal should
-        // try to gain concensus on the next slot.
-        ++balnum.slot_num;
-        accept_bals[balnum.slot_num] = {0, my_id, balnum.slot_num};
+        // try to gain consensus on the next slot.
+        if (decision.slotnum > balnum->slot_num) {
+                // need to recover missing gaps in log
+                // TODO: recover_log();
+                // We tell (leader? someone) that we are missing log[slot] entry.
+                // They send their log value at that slot. If they have a valid
+                // entry in the log at that slot number, then a quorum was reached at
+                // some point in time, so we know it is the correct value. If the peer
+                // doesn't know the log[slot] value, we need to ask someone else!
+
+//                balnum->slot_num = decision.slotnum + 1;
+//                accept_bals[balnum->slot_num] = {0, my_id, balnum->slot_num};
+        }
+
+        balnum->slot_num++;
+        accept_bals[balnum->slot_num] = {0, my_id, balnum->slot_num};
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -695,7 +725,7 @@ void paxos_node::say(std::string &&message) const
         }
 
         std::cout << fmt::format("P_{} ({}, {}, {}) <{}>: {}",
-                                 my_id, balnum.seq_num, balnum.node_pid, balnum.slot_num, readable_state, message)
+                                 my_id, balnum->seq_num, balnum->node_pid, balnum->slot_num, readable_state, message)
                 << std::endl;
 }
 

@@ -10,8 +10,10 @@
 #include <cassert>
 
 
-//#include "cs171_cfg.h"
+#include "cs171_cfg.h"
 #include "blockchain.h"
+
+extern cs171_cfg::node_id_t my_id;
 
 namespace paxos_msg {
     using V = transaction;
@@ -45,9 +47,9 @@ namespace paxos_msg {
     };
 
     struct ballot_num {
-        size_t seq_num; // sequence number
-        uint8_t node_pid;
-        size_t slot_num;
+        size_t seq_num {0}; // sequence number
+        uint8_t node_pid {my_id};
+        size_t slot_num {1};
 
         ballot_num(size_t number, uint8_t nodePid, size_t slotNumber)
         : seq_num(number), node_pid(nodePid), slot_num(slotNumber)
@@ -100,8 +102,12 @@ namespace paxos_msg {
     using prepare_msg = ballot_num;
 //    using accept_msg = ballot_num; // also needs value
     using accepted_msg = ballot_num;
-    using decide_msg = V;
     using fwd_msg = V;
+
+    struct decide_msg {
+        V val;
+        size_t slotnum;
+    };
 
     struct promise_msg {
         /* Ballot number
@@ -138,12 +144,12 @@ namespace paxos_msg {
         void serialize(Archive &ar) {
             ar(type);
             switch (type) {
-                case PREPARE: { ar(prep); break; }
-                case PROMISE: { ar(prom.balnum, prom.acceptnum, prom.acceptval); break; }
-                case ACCEPT: { ar(acc.balnum, acc.value); break; }
-                case ACCEPTED: { ar(accd); break; }
-                case DECIDE: { ar(dec); break; }
-                case FWD_VAL: { ar(fwd); break; }
+                case PREPARE: ar(prep); break;
+                case PROMISE: ar(prom.balnum, prom.acceptnum, prom.acceptval); break;
+                case ACCEPT: ar(acc.balnum, acc.value); break;
+                case ACCEPTED: ar(accd); break;
+                case DECIDE: ar(dec.val); ar(dec.slotnum); break;
+                case FWD_VAL: ar(fwd); break;
                 default: break;
             }
         }

@@ -52,7 +52,7 @@ static EVP_MD_CTX *sha256_ctx;
 
 std::string format_as(transaction tr)
 {
-        return fmt::format("P{} -${}-> P{}", tr.sender, tr.receiver, tr.amt);
+        return fmt::format("P{} -${}-> P{}", tr.sender, tr.amt, tr.receiver);
 }
 
 //template<>
@@ -81,7 +81,8 @@ struct fmt::formatter<u256> {
     }
 };
 
-std::string format_as(const blockchain::block &blk) {
+std::string format_as(const blockchain::block &blk)
+{
         return fmt::format("({}, {})", blk.T, blk.H);
 }
 
@@ -99,7 +100,9 @@ blockchain::block::block(transaction t, block *prev)
 
 void blockchain::block::compute_nonce()
 {
-//        assert(sha256_ctx != nullptr);
+#ifndef CSIL
+        assert(sha256_ctx != nullptr);
+#endif
         u256 sha_out {0};
 
         this->N = 0;

@@ -18,7 +18,7 @@ using TimePoint = std::chrono::time_point<Clock>;
  * BAAAD things will happen if we become full!
  * Also, the size has to be a power of 2.
  */
-template <typename T, size_t bufsize=128>
+template <typename T, /*size_t n_writers=1,*/ size_t bufsize=128>
         //requires std::is_trivially_copyable_v<T>
         //        && ((bufsize & (bufsize - 1)) == 0)
 class sema_q {

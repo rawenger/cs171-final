@@ -10,6 +10,8 @@
 #include <vector>
 #include <type_traits>
 
+#include "cs171_cfg.h"
+
 template <typename T>
 concept FS_BUF_T = std::is_trivially_copyable_v<T>
         && std::is_nothrow_default_constructible_v<T>;
@@ -19,7 +21,7 @@ concept FS_BUF_T = std::is_trivially_copyable_v<T>
 template <FS_BUF_T T>
 class fs_buf {
 public:
-    explicit fs_buf(uint8_t my_id, const char *file_label);
+    explicit fs_buf(cs171_cfg::node_id_t my_id, const char *file_label);
     fs_buf(const fs_buf &other) = delete;
     fs_buf(fs_buf &&other) noexcept;
     ~fs_buf();
@@ -33,7 +35,16 @@ public:
     void reserve(size_t n_entries);
 
     /// 1-indexed!!!!! grows container to `pos` if necessary
-    T& operator[](size_t pos);
+    T &operator[](size_t pos);
+
+    T &operator*()
+    { return *buf; }
+
+    T *operator->()
+    { return buf; }
+
+    const T *operator->() const
+    { return buf; }
 
 private:
     static constexpr char dummydata = '\0';

@@ -6,7 +6,7 @@
 #include <map>
 #include <memory>
 #include <future>
-#include <boost/lockfree/queue.hpp>
+#include <queue>
 
 #include "paxos_msg.h"
 #include "blockchain.h"
@@ -65,7 +65,6 @@ class paxos_node {
     std::atomic_flag update_pfds {false};
     size_t n_peers;
 
-//    const cs171_cfg::system_cfg config;
     node_id_t my_id;
     std::string my_hostname;
     int my_port;
@@ -75,15 +74,15 @@ class paxos_node {
 
     NODE_STATE my_state;
 
-    paxos_msg::ballot_num balnum;
-    std::vector<paxos_msg::V> log;
+    fs_buf<paxos_msg::ballot_num> balnum;
+    fs_buf<std::optional<paxos_msg::V>> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
-//    std::map<size_t, paxos_msg::ballot_num> accept_bals {};
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
 
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> acc_q {};
-    boost::lockfree::queue<paxos_msg::V> request_q {64};
+    std::mutex req_q_mut;
+    std::queue<paxos_msg::V> request_q;
     std::mutex propose_mut;
 
     std::jthread polling_thread {};
@@ -132,5 +131,5 @@ public:
     bool fail_link(cs171_cfg::node_id_t peer_id);
     bool fix_link(cs171_cfg::node_id_t peer_id);
     std::string dump_op_queue() /* const */;
-    std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
+    std::string dump_log(); //NOLINT(modernize-use-nodiscard)
 };
