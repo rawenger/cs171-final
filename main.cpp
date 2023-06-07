@@ -28,6 +28,8 @@ static std::string my_hostname;
 
 cs171_cfg::system_cfg *config {nullptr};
 
+#include "blag.h"
+
 int main(int argc, char **argv)
 {
         if (argc < 2) {

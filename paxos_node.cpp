@@ -274,6 +274,8 @@ std::string paxos_node::dump_log()
         for (size_t slot = 1; slot < balnum->slot_num; ++slot) {
                 fmt::print("#{:2}: {}\n", slot, log[slot]);
         }
+
+	return std::string();
 }
 
 /************************************************************************************
