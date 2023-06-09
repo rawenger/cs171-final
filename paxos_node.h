@@ -81,16 +81,18 @@ class paxos_node {
 
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> acc_q {};
-    std::mutex req_q_mut;
-    std::queue<paxos_msg::V> request_q;
+//    std::mutex req_q_mut;
+    sema_q<paxos_msg::V, 2> request_q;
     std::mutex propose_mut;
 
     std::jthread polling_thread {};
+//    std::thread req_worker {};
 
     [[noreturn]] void listen_connections();
 
     peer_connection *new_peer(socket_t sock, node_id_t id);
 
+    void request_loop();
     void handle_msg(socket_t sender, paxos_msg::msg &&m);
 
     // only called from polling thread
