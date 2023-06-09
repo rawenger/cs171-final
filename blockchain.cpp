@@ -108,7 +108,7 @@ void blockchain::block::compute_nonce()
         this->N = 0;
         hash(sha_out);
 
-        while((sha_out[0] & (3 << 6)) != 0) {
+        while((sha_out[0] & (7 << 5)) != 0) {
                 this->N = (N + 1) & -1L;
                 hash(sha_out);
         }

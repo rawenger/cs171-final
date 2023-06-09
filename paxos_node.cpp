@@ -179,7 +179,7 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
         my_state = PREPARER;
 
         polling_thread = std::jthread{polling_loop, this};
-        std::thread{&paxos_node::request_loop, this}.detach();
+        std::thread{&paxos_node::request_worker, this}.detach();
 }
 
 void paxos_node::propose(paxos_msg::V value)
@@ -229,12 +229,13 @@ std::string paxos_node::dump_op_queue() /* const */
 
 std::string paxos_node::dump_log()
 {
+        std::string result = "";
         // TODO: implement an iterator for fs_buf so this can be re-marked const
         for (size_t slot = 1; slot < balnum->slot_num; ++slot) {
-                fmt::print("#{:2}: {}\n", slot, log[slot]);
+                result += fmt::format("#{:2}: {}\n", slot, log[slot]);
         }
 
-	return std::string();
+	return result;
 }
 
 /************************************************************************************
@@ -242,7 +243,7 @@ std::string paxos_node::dump_log()
  ************************************************************************************/
 
 
-void paxos_node::request_loop()
+void paxos_node::request_worker()
 {
         while (true) {
                 std::vector<cs171_cfg::socket_t> accept_targets{};
@@ -328,6 +329,9 @@ bool paxos_node::broadcast_accept(
 
         pmut.lock();
         for (const auto &peer : targets) {
+                if (!peers.contains(peer))
+                        continue;
+
                 // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Broadcasting ACCEPT to P_{} with ballot {}.",
                                 peer_id_of(peer),
@@ -459,19 +463,20 @@ paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval
 
                 const auto &[sender, promise] = maybe_prom.value();
 
+                // Only if the node is promising to join our most recent ballot. Otherwise, it's
+                // an old promise.
+                if (*balnum != promise.balnum)
+                        continue;
+
                 say(fmt::format("Received PROMISE from P_{} to ballot {}. "
                                 "Last accepted ballot is {} with value '{}'.",
                                 peer_id_of(sender), promise.balnum,
                                 promise.acceptnum, promise.acceptval));
 
-                // Only if the node is promising to join our most recent ballot. Otherwise, it's
-                // an old promise.
-                if (*balnum == promise.balnum) {
-                        n_responses += 1;
-                        retvec.push_back(sender);
-                        if (promise.acceptval.has_value()) {
-                                promises_with_value.push_back(promise);
-                        }
+                n_responses += 1;
+                retvec.push_back(sender);
+                if (promise.acceptval.has_value()) {
+                        promises_with_value.push_back(promise);
                 }
         }
 
@@ -484,7 +489,6 @@ paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval
                 )->acceptval.value();
         }
 
-//        retval.set_value_at_thread_exit(std::move(returnval));
         return retvec;
 }
 
@@ -505,11 +509,16 @@ bool paxos_node::receive_accepteds(const TimePoint timeout_time)
 
                 const auto &[sender, msg] = response.value();
 
+                // We only care about this if the node is responding to our most recent ballot.
+                // Otherwise, it's an old promise.
+                if (*balnum != msg)
+                        continue;
+
                 say(fmt::format("Received ACCEPTED from P_{} to ballot {}.",
                                 peer_id_of(sender),
                                 msg));
 
-                n_responses += (*balnum == msg);
+                n_responses++;
         }
 
         return true;
@@ -726,9 +735,7 @@ void paxos_node::say(std::string &&message) const
 cs171_cfg::node_id_t paxos_node::peer_id_of(cs171_cfg::socket_t peer)
 {
         std::lock_guard<decltype(pmut)> lk{pmut};
-        cs171_cfg::socket_t id = peers.at(peer)->client_id;
-
-        return id;
+        return peers.at(peer)->client_id;
 }
 
 bool paxos_node::has_connection_to(cs171_cfg::node_id_t id)

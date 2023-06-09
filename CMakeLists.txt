@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(cs171_final)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_COMPILER g++-12)
+set(CMAKE_CXX_COMPILER g++)
 
 set(EXECUTABLES cs171_final)
 

@@ -92,7 +92,7 @@ class paxos_node {
 
     peer_connection *new_peer(socket_t sock, node_id_t id);
 
-    void request_loop();
+    void request_worker();
     void handle_msg(socket_t sender, paxos_msg::msg &&m);
 
     // only called from polling thread
