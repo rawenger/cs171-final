@@ -109,6 +109,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (pfd.revents & SOCK_REVENT_CLOSE
                             || pfd.revents & POLLNVAL)
                         {
+                                me->pmut.lock();
                                 DBG("Peer P{} has been disconnected\n",
                                     me->peers.at(pfd.fd)->client_id);
                                 auto lead = me->leader.load();
@@ -117,10 +118,9 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                                         me->set_leader(nullptr);
                                 }
                                 close(pfd.fd);
-                                me->pmut.lock();
                                 me->peers.erase(pfd.fd);
-                                me->pmut.unlock();
                                 me->update_pfds.test_and_set();
+                                me->pmut.unlock();
                         }
                         return pfd.revents & SOCK_REVENT_CLOSE;
                 });
@@ -179,54 +179,13 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
         my_state = PREPARER;
 
         polling_thread = std::jthread{polling_loop, this};
+        std::thread{&paxos_node::request_loop, this}.detach();
 }
 
 void paxos_node::propose(paxos_msg::V value)
 {
         DBG("Proposing {}\n", value);
-        req_q_mut.lock();
         request_q.push(value);
-        req_q_mut.unlock();
-
-        // TODO: do we need to put the operation back on the queue if we don't reach a DECIDE on it?
-        std::thread{[this] () -> void {
-                while (!request_q.empty())
-                // wait till the previous operation is done
-                std::lock_guard<decltype(propose_mut)> lk1{propose_mut};
-
-                std::vector<cs171_cfg::socket_t> accept_targets{};
-                paxos_msg::V value;
-                // NOTE: don't have to lock since we are the only ones dequeueing
-                // actually we do because it's backed by std::vector and we're
-                // changing the size of the vector
-                req_q_mut.lock();
-                value = request_q.front();
-                req_q_mut.unlock();
-
-                // TODO: jackson pls double check this logic
-                auto lead = leader.load();
-                if (lead) {
-                        forward_msg(lead, value);
-                        return;
-                }
-
-                if (my_state == LEARNER) { // I am the leader
-                        std::lock_guard<decltype(pmut)> lk2{pmut};
-                        for (const auto &[sock, _] : peers) {
-                                accept_targets.push_back(sock);
-                        }
-                } else { // I am not the leader, but I don't know who is
-                        accept_targets = broadcast_prepare(value); // treats `value` as out pointer
-                        if (!accept_targets.empty()) my_state = LEARNER;
-                }
-
-                if (!accept_targets.empty() && broadcast_accept(value, accept_targets)) {
-                        req_q_mut.lock();
-                        request_q.pop();
-                        req_q_mut.unlock();
-                        broadcast_decision(value);
-                }
-        }}.detach();
 }
 
 bool paxos_node::fail_link(cs171_cfg::node_id_t peer_id)
@@ -281,6 +240,39 @@ std::string paxos_node::dump_log()
 /************************************************************************************
  *                              PRIVATE MEMBER FUNCTIONS
  ************************************************************************************/
+
+
+void paxos_node::request_loop()
+{
+        while (true) {
+                std::vector<cs171_cfg::socket_t> accept_targets{};
+                paxos_msg::V value;
+
+                value = request_q.top();
+
+                auto lead = leader.load();
+                if (lead) {
+                        forward_msg(lead, value);
+                        request_q.pop();
+                        return;
+                }
+
+                if (my_state == LEARNER) { // I am the leader
+                        std::lock_guard<decltype(pmut)> lk2{pmut};
+                        for (const auto &[sock, _] : peers) {
+                                accept_targets.push_back(sock);
+                        }
+                } else { // I am not the leader, but I don't know who is
+                        accept_targets = broadcast_prepare(value); // treats `value` as out pointer
+                        if (!accept_targets.empty()) my_state = LEARNER;
+                }
+
+                if (!accept_targets.empty() && broadcast_accept(value, accept_targets)) {
+                        request_q.pop();
+                        broadcast_decision(value);
+                }
+        }
+}
 
 std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &value)
 {

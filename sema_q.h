@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <semaphore>
 #include <optional>
+#include <mutex>
 
 using Clock = std::chrono::high_resolution_clock;
 using TimePoint = std::chrono::time_point<Clock>;
@@ -18,12 +19,13 @@ using TimePoint = std::chrono::time_point<Clock>;
  * BAAAD things will happen if we become full!
  * Also, the size has to be a power of 2.
  */
-template <typename T, /*size_t n_writers=1,*/ size_t bufsize=128>
+template <typename T, size_t n_writers=1, size_t bufsize=128>
         //requires std::is_trivially_copyable_v<T>
         //        && ((bufsize & (bufsize - 1)) == 0)
 class sema_q {
     size_t head{0};
     size_t tail{0};
+    std::mutex write_lock;
 
     std::counting_semaphore<bufsize> size{0};
     T buf[bufsize] {};
@@ -33,9 +35,16 @@ public:
 
     void push(T i)
     {
-        buf[tail] = i;
-        tail = (tail + 1) & (bufsize - 1);
-        size.release();
+        if constexpr (n_writers > 1) {
+            std::lock_guard<decltype(write_lock)> lk {write_lock};
+            buf[tail] = i;
+            tail = (tail + 1) & (bufsize - 1);
+            size.release();
+        } else {
+            buf[tail] = i;
+            tail = (tail + 1) & (bufsize - 1);
+            size.release();
+        }
     }
 
     T pop()
@@ -44,6 +53,15 @@ public:
         size_t hd = head;
         head = (head + 1) & (bufsize - 1);
         return buf[hd];
+    }
+
+    T top()
+    {
+            // need to block until we can acquire, but not actually
+            // consume anything
+            size.acquire();
+            size.release();
+            return buf[head];
     }
 
     std::optional<T> try_pop_until(const TimePoint& abs_time)
@@ -58,4 +76,3 @@ public:
     }
 
 };
-
