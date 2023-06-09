@@ -1,15 +1,16 @@
+#include <charconv>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "cli_interface.h"
 
-static auto parse_list(const std::string &text) -> input::arguments;
-static auto parse_call(const std::string &text) -> std::optional<input::call>;
-static auto parse_name(const std::string &text) -> std::optional<input::KIND>;
-static auto parse_pid(const std::string &text) -> std::optional<input::pid>;
+static auto parse_list(const std::string_view text) -> input::arguments;
+static auto parse_call(const std::string_view text) -> std::optional<input::call>;
+static auto parse_name(const std::string_view text) -> std::optional<input::KIND>;
+static auto parse_pid(const std::string_view text) -> std::optional<input::pid>;
 
-auto parse_input(const std::string &text) -> std::optional<input>
+auto parse_input(const std::string_view text) -> std::optional<input>
 {
     std::optional<input> maybe_input;
     const auto maybe_call = parse_call(text);
@@ -30,7 +31,9 @@ auto parse_input(const std::string &text) -> std::optional<input>
         case input::KIND::BLOCKCHAIN:
         case input::KIND::QUEUE:
         case input::KIND::LOG:
+        case input::KIND::BLOG: {
             break;
+        }
 
         case input::KIND::FAIL_LINK: {
             if (args.size() != 1) {
@@ -71,11 +74,57 @@ auto parse_input(const std::string &text) -> std::optional<input>
                     return maybe_input;
             }
             // obviously atoi() is only here since we won't be using this in the final product
-            uint16_t amt = atoi(args[1].c_str()); //NOLINT(cert-err34-c)
+            uint16_t value;
+            auto amt = std::from_chars(args[1].data(), args[1].data() + args[1].size(), value);
+
+            if (amt.ec == std::errc::invalid_argument) {
+                return maybe_input;
+            }
+
             input.transaction = {
                     .dest = *dest,
-                    .amt = amt
+                    .amt = value
             };
+            break;
+        }
+
+        case input::KIND::POST: {
+            if (args.size() != 3) {
+                return maybe_input;
+            }
+
+            input.post.author = args[0];
+            input.post.title = args[2];
+            input.post.body = args[3];
+            break;
+        }
+
+        case input::KIND::COMMENT: {
+            if (args.size() != 3) {
+                return maybe_input;
+            }
+
+            input.comment.commenter = args[0];
+            input.comment.title = args[1];
+            input.comment.comment = args[2];
+            break;
+        }
+
+        case input::KIND::VIEW: {
+            if (args.size() != 1) {
+                return maybe_input;
+            }
+
+            input.view.author = args[0];
+            break;
+        }
+
+        case input::KIND::READ: {
+            if (args.size() != 1) {
+                return maybe_input;
+            }
+
+            input.read.title = args[0];
             break;
         }
     }
@@ -83,10 +132,10 @@ auto parse_input(const std::string &text) -> std::optional<input>
     return input;
 }
 
-static auto parse_list(const std::string &text) -> input::arguments
+static auto parse_list(const std::string_view text) -> input::arguments
 {
     const std::string sep = ", ";
-    std::vector<std::string> args { };
+    std::vector<std::string_view> args { };
 
     if (text.empty()) {
         return args;
@@ -95,7 +144,7 @@ static auto parse_list(const std::string &text) -> input::arguments
     size_t start_of_arg = 0;
     size_t end_of_arg = text.find(sep);
 
-    while (end_of_arg != std::string::npos) {
+    while (end_of_arg != std::string_view::npos) {
         const auto arg = text.substr(start_of_arg, end_of_arg - start_of_arg);
         args.push_back(arg);
         start_of_arg = end_of_arg + sep.size();
@@ -108,7 +157,7 @@ static auto parse_list(const std::string &text) -> input::arguments
     return args;
 }
 
-static auto parse_call(const std::string &text) -> std::optional<input::call>
+static auto parse_call(const std::string_view text) -> std::optional<input::call>
 {
     std::optional<input::call> call;
 
@@ -133,7 +182,7 @@ static auto parse_call(const std::string &text) -> std::optional<input::call>
     return call;
 }
 
-static auto parse_name(const std::string &text) -> std::optional<input::KIND>
+static auto parse_name(const std::string_view text) -> std::optional<input::KIND>
 {
     std::optional<input::KIND> kind {};
 
@@ -156,7 +205,7 @@ static auto parse_name(const std::string &text) -> std::optional<input::KIND>
     return kind;
 }
 
-static auto parse_pid(const std::string &text) -> std::optional<input::pid>
+static auto parse_pid(const std::string_view text) -> std::optional<input::pid>
 {
     std::optional<input::pid> maybe_pid;
 
@@ -164,11 +213,15 @@ static auto parse_pid(const std::string &text) -> std::optional<input::pid>
         return maybe_pid;
     }
 
-    try {
-        int pid = std::stoi(text.substr(1));
-        maybe_pid = pid;
-    } catch (std::invalid_argument &) { }
+    auto no_prefix = text.substr(1);
+    input::pid value;
+    auto pid = std::from_chars(no_prefix.data(), no_prefix.data() + no_prefix.size(), value);
 
+    if (pid.ec == std::errc::invalid_argument) {
+        return maybe_pid;
+    }
+
+    maybe_pid = value;
     return maybe_pid;
 }
 

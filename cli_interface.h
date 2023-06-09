@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -9,7 +10,7 @@
 
 struct input {
     using pid = cs171_cfg::node_id_t;
-    using arguments = std::vector<std::string>;
+    using arguments = std::vector<std::string_view>;
     using call = std::pair<std::string, arguments>;
 
     enum class KIND {
@@ -19,7 +20,12 @@ struct input {
         TRANSACTION,
         BLOCKCHAIN, // blockchain()
         QUEUE,      // queue()
-        LOG         // log()
+        LOG,        // log()
+        POST,       // post(username, title, content)
+        COMMENT,    // comment(username, title, content)
+        BLOG,       // blog()
+        VIEW,       // view(username)
+        READ,       // read(title)
     } tag;
 
     // See: C++'s union-like classes. https://en.cppreference.com/w/cpp/language/union
@@ -31,6 +37,12 @@ struct input {
         struct {} blockchain;
         struct {} queue;
         struct {} log;
+        struct {std::string_view author; std::string_view title; std::string_view body;} post;
+        struct {std::string_view commenter; std::string_view title; std::string_view comment;} comment;
+        struct {} blog;
+        struct {std::string_view author;} view;
+        struct {std::string_view title;} read;
+
     };
 };
 
@@ -38,4 +50,4 @@ struct input {
  * @param text Input text to parse, straight from the user
  * @return `None` if syntax error, else tagged union `input` type
  */
-auto parse_input(const std::string &text) -> std::optional<input>;
+auto parse_input(const std::string_view text) -> std::optional<input>;
