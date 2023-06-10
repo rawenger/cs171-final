@@ -15,7 +15,7 @@ private:
         static constexpr size_t max_string_size = 128;
         using user = char[max_string_size];
         using content = char[max_string_size];
-	using timestamp = std::chrono::nanoseconds;
+	using timestamp = std::chrono::system_clock::time_point;
 
         using raw_comment = std::pair<user, content>;
 

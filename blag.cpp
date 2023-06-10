@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "fmt/core.h"
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+#include <fmt/chrono.h>
 
 #include "blag.h"
 
@@ -14,8 +16,7 @@ auto blag::transact(transaction trans) -> void
 {
         if (std::holds_alternative<post_transaction>(trans)) {
                 // Commit a post to the blog.
-                auto now = std::chrono::system_clock::now();
-                timestamp stamp = std::chrono::duration_cast<timestamp>(now.time_since_epoch());
+                timestamp stamp = std::chrono::system_clock::now();
                 const post_transaction &post_trans = std::get<post_transaction>(trans);
                 post post = {
                         .author = post_trans.author,
@@ -52,7 +53,61 @@ auto blag::find_post_with_title(std::string_view title) -> post *
         return nullptr;
 }
 
-// Make a new blog post identified by the given title. 
+// List the title and author of all blog posts in chronological order.
+auto blag::all_posts(std::ostream &out) -> void
+{
+        if (posts.empty()) {
+                fmt::print(out, "<no posts in blog>\n");
+                return;
+        }
+
+        for (auto &&finger = posts.begin(); finger != posts.end(); ++finger) {
+                const post &post = finger->second;
+                fmt::print(out, "@{}: '{}' -- [stamped: {:%x at %X}]\n",
+                           post.author, post.title, post.stamp);
+        }
+}
+
+// List the title and content of all blog posts made by this user in chronological order.
+auto blag::all_posts_by(std::string_view author, std::ostream &out) -> void
+{
+        bool found = false;
+        for (auto finger = posts.begin(); finger != posts.end(); ++finger) {
+                const post &post = finger->second;
+                if (post.author == author) {
+                        fmt::print(out, "@{}: '{}' -- [stamped: {:%x at %X}]\n"
+                                        "    > {}\n",
+                                   post.author, post.title, post.stamp, post.body);
+                        found = true;
+                }
+        }
+
+        if (!found) {
+                fmt::print(out, "<no posts by @{}>\n", author);
+        }
+}
+
+// List the content of the given blog post and its comments, including commenter and content.
+auto blag::view_comments(std::string_view title, std::ostream &out) -> void
+{
+        const post *post = find_post_with_title(title);
+
+        if (post == nullptr) {
+                fmt::print(out, "<no post titled '{}'>\n", title);
+        } else {
+                fmt::print(out, "@{}: '{}' -- [stamped: {:%x at %X}]\n"
+                                "    > {}\n",
+                                post->author, post->title, post->stamp, post->body);
+
+                if (post->comments.empty())
+                        fmt::print(out, "    @cricket: just me in here? lol\n");
+
+                for (const comment &comment : post->comments)
+                        fmt::print(out, "    @{}: {}\n", comment.user, comment.content);
+        }
+}
+
+// Make a new blog post identified by the given title.
 //auto blag::new_post(user author, content title, content body) -> void
 //{
 //        // TODO: Don't default-initialize, find the magical candidate function that does it in place.
@@ -78,62 +133,6 @@ auto blag::find_post_with_title(std::string_view title) -> post *
 //        trans = comm_trans;
 //        transact(trans);
 //}
-
-// List the title and author of all blog posts in chronological order.
-auto blag::all_posts(std::ostream &out) -> void
-{
-        if (!posts.empty()) {
-                for (auto &&finger = posts.begin(); finger != posts.end(); ++finger) {
-                        const post &post = finger->second;
-                        out << fmt::format("@{}: '{}' -- ", post.author, post.title);
-                        out << "[stamped: " << post.stamp << "]" << std::endl; // TODO: Good god the format library.
-                }
-        } else {
-                out << "<no posts in blog>" << std::endl;
-        }
-}
-
-// List the title and content of all blog posts made by this user in chronological order.
-auto blag::all_posts_by(std::string_view author, std::ostream &out) -> void
-{
-        size_t found = 0;
-        for (auto finger = posts.begin(); finger != posts.end(); ++finger) {
-                const post &post = finger->second;
-                if (post.author == author) {
-                        out << fmt::format("@{}: '{}' -- ", post.author, post.title);
-                        out << "[stamped: " << post.stamp << "]" << std::endl; // TODO: Good god the format library.
-                        out << "    > " << post.body << std::endl;
-                        found += 1;
-                }
-        }
-
-        if (found < 1) {
-                out << fmt::format("<no posts by @{}>", author) << std::endl;
-        }
-}
-
-// List the content of the given blog post and its comments, including commenter and content.
-auto blag::view_comments(std::string_view title, std::ostream &out) -> void
-{
-        const post *post = find_post_with_title(title);
-
-        if (post == nullptr) {
-                out << fmt::format("<no post titled '{}'>", title) << std::endl;
-        } else {
-                out << fmt::format("@{}: '{}' -- ", post->author, post->title);
-                out << "[stamped: " << post->stamp << "]" << std::endl; // TODO: Good god the format library.
-                out << "    > " << post->body << std::endl;
-                if (!post->comments.empty()) {
-                        for (const comment &comment : post->comments) {
-                                out << "    " << fmt::format("@{}: {}", comment.user, comment.content) << std::endl;
-                        }
-                } else {
-                        out << "    " << "@cricket: just me in here? lol" << std::endl;
-                }
-        }
-
-}
-
 /*
 auto dummy_transactions(std::ostream &out) -> void
 {
