@@ -3,7 +3,9 @@
 //
 
 #ifdef __linux__
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #define SOCK_EVENT_CLOSE        POLLRDHUP
 #define SOCK_REVENT_CLOSE       POLLRDHUP
 #else
@@ -163,10 +165,10 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
         my_hostname(std::move(node_hostname)),
         my_port(config->my_port),
         n_peers(config->n_peers),
-        balnum(my_id, "num"),
-        accept_bals(my_id, "bals"),
-        accept_vals(my_id, "vals"),
-        log(my_id, "log")
+        balnum("num"),
+        accept_bals("bals"),
+        accept_vals("vals"),
+        log("log")
 {
         accept_bals[1] = *balnum;
 
@@ -234,12 +236,19 @@ std::string paxos_node::dump_op_queue() /* const */
         return "dump_op_queue() STUB";
 }
 
-std::string paxos_node::dump_log()
+std::string paxos_node::dump_log() const
 {
         std::string result;
-        // TODO: implement an iterator for fs_buf so this can be re-marked const
-        for (size_t slot = 1; slot < balnum->slot_num; ++slot) {
-                result += fmt::format("#{:2}: {}\n", slot, log[slot]);
+
+        // NOTE: below doesn't work because we also want to include the slot #
+        // return fmt::format("#{:2}: {}\n", fmt::join(log.cbegin(), log.cend(), ""));
+
+        size_t slot = 1;
+        for (auto it = log.cbegin();
+             slot < balnum->slot_num && it != log.cend();
+             ++slot, ++it)
+        {
+                result += fmt::format("#{:3}: {}\n", slot, *it);
         }
 
 	return result;

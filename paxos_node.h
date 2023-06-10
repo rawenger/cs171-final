@@ -132,5 +132,5 @@ public:
     bool fail_link(cs171_cfg::node_id_t peer_id);
     bool fix_link(cs171_cfg::node_id_t peer_id);
     std::string dump_op_queue() /* const */;
-    std::string dump_log(); //NOLINT(modernize-use-nodiscard)
+    std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
 };
