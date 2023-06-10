@@ -80,12 +80,9 @@ class paxos_node {
 
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> acc_q {};
-//    std::mutex req_q_mut;
-    sema_q<paxos_msg::V, 2> request_q;
-    std::mutex propose_mut;
+    sema_q<paxos_msg::V, true> request_q;
 
     std::jthread polling_thread {};
-//    std::thread req_worker {};
 
     [[noreturn]] void listen_connections();
 
@@ -131,6 +128,6 @@ public:
 
     bool fail_link(cs171_cfg::node_id_t peer_id);
     bool fix_link(cs171_cfg::node_id_t peer_id);
-    std::string dump_op_queue() /* const */;
+    std::string dump_op_queue();
     std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
 };

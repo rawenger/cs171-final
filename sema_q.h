@@ -9,6 +9,7 @@
 #include <semaphore>
 #include <optional>
 #include <mutex>
+#include <shared_mutex>
 
 using Clock = std::chrono::high_resolution_clock;
 using TimePoint = std::chrono::time_point<Clock>;
@@ -18,14 +19,17 @@ using TimePoint = std::chrono::time_point<Clock>;
  * The design assumes we will NEVER become full!
  * BAAAD things will happen if we become full!
  * Also, the size has to be a power of 2.
+ *
+ * Update: this has been bastardized a bit and now is weird.
  */
-template <typename T, size_t n_writers=1, size_t bufsize=128>
+template <typename T, bool multiple_writers=false, size_t bufsize=128>
         //requires std::is_trivially_copyable_v<T>
         //        && ((bufsize & (bufsize - 1)) == 0)
 class sema_q {
     size_t head{0};
     size_t tail{0};
     std::mutex write_lock;
+    std::shared_mutex dump_lk;
 
     std::counting_semaphore<bufsize> size{0};
     T buf[bufsize] {};
@@ -35,7 +39,9 @@ public:
 
     void push(T i)
     {
-        if constexpr (n_writers > 1) {
+        std::shared_lock<decltype(dump_lk)> sl {dump_lk};
+
+        if constexpr (multiple_writers) {
             std::lock_guard<decltype(write_lock)> lk {write_lock};
             buf[tail] = i;
             tail = (tail + 1) & (bufsize - 1);
@@ -50,12 +56,13 @@ public:
     T pop()
     {
         size.acquire();
+        std::shared_lock<decltype(dump_lk)> sl {dump_lk};
         size_t hd = head;
         head = (head + 1) & (bufsize - 1);
         return buf[hd];
     }
 
-    T top()
+    T front()
     {
             // need to block until we can acquire, but not actually
             // consume anything
@@ -64,6 +71,7 @@ public:
             return buf[head];
     }
 
+    // NOTE: don't expect to use this on the same queue object as format_as()!!!
     std::optional<T> try_pop_until(const TimePoint& abs_time)
     {
         if (size.try_acquire_until(abs_time)) {
@@ -73,5 +81,17 @@ public:
         } else {
             return {};
         }
+    }
+
+    std::string format()
+    {
+        std::unique_lock<decltype(dump_lk)> sl {dump_lk};
+        std::string result = "[";
+
+        for (size_t idx = head; idx != tail; idx = (idx + 1) & (bufsize - 1)) {
+            result += fmt::format("{} ", buf[idx]);
+        }
+
+        return result + ']';
     }
 };

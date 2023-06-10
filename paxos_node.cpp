@@ -228,12 +228,9 @@ bool paxos_node::fix_link(cs171_cfg::node_id_t peer_id)
         return connect_to(*target);
 }
 
-std::string paxos_node::dump_op_queue() /* const */
+std::string paxos_node::dump_op_queue()
 {
-        // TODO: Seriously the only way I can think of implementing this is to derive the lock-free
-        //  queue class and add a (thread-unsafe) iterator over the nodes.
-        //  Or add a copy constructor. ugh.
-        return "dump_op_queue() STUB";
+        return fmt::format("queue: {}\n", request_q.format());
 }
 
 std::string paxos_node::dump_log() const
@@ -265,7 +262,7 @@ void paxos_node::request_worker()
                 std::vector<cs171_cfg::socket_t> accept_targets{};
                 paxos_msg::V value;
 
-                value = request_q.top();
+                value = request_q.front();
 
                 auto lead = leader.load();
                 if (lead) {

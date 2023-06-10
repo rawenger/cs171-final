@@ -10,7 +10,7 @@
 namespace cs171_cfg {
     using namespace std::chrono_literals;
     constexpr const char *CLIENT_CFG = "clients.csv";
-    constexpr auto NETWORK_DELAY = 0s;
+    constexpr auto NETWORK_DELAY = 5s;
 
     /** `err_msg` must be a string literal! */
     template <bool Async=true>
@@ -33,7 +33,7 @@ namespace cs171_cfg {
                     bufcpy = static_cast<const uint8_t *>(buffer);
             }
 
-            auto sender = [=]() -> ssize_t {
+            auto send_worker = [=]() -> ssize_t {
                     std::this_thread::sleep_until(wake_time);
                     ssize_t result = send(socket, bufcpy, length, flags);
                     if (result < 0)
@@ -46,9 +46,9 @@ namespace cs171_cfg {
             };
 
             if constexpr (execute_async)
-                    std::thread{sender}.detach();
+                    std::thread{send_worker}.detach();
             else
-                    return sender();
+                    return send_worker();
 
             return static_cast<ssize_t>(length);
     }
