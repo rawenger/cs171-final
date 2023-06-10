@@ -176,6 +176,13 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
                 connect_to(peer);
         }
 
+        // reconstruct the blockchain; we can assume
+        //  that we don't have any holes in the log
+        for (size_t i = 1; log[i].has_value(); i++) {
+                blockchain::BLOCKCHAIN.transact(*log[i]);
+                blag::BLAG.transact(*log[i]);
+        }
+
         my_state = PREPARER;
 
         polling_thread = std::jthread{polling_loop, this};
@@ -229,7 +236,7 @@ std::string paxos_node::dump_op_queue() /* const */
 
 std::string paxos_node::dump_log()
 {
-        std::string result = "";
+        std::string result;
         // TODO: implement an iterator for fs_buf so this can be re-marked const
         for (size_t slot = 1; slot < balnum->slot_num; ++slot) {
                 result += fmt::format("#{:2}: {}\n", slot, log[slot]);
@@ -281,12 +288,7 @@ std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &val
         balnum->seq_num += 1;
         balnum->node_pid = my_id;
 
-        paxos_msg::prepare_msg prepare = *balnum;
-
-        paxos_msg::msg msg = {
-                .type = paxos_msg::MSG_TYPE::PREPARE,
-                .prep = prepare,
-        };
+        paxos_msg::msg msg = paxos_msg::prepare_msg {*balnum};
 
         auto payload = paxos_msg::encode_msg(msg);
         pmut.lock();
@@ -320,10 +322,7 @@ bool paxos_node::broadcast_accept(
 
         accept.balnum.node_pid = my_id;
 
-        paxos_msg::msg msg = {
-                .type = paxos_msg::MSG_TYPE::ACCEPT,
-                .acc = accept,
-        };
+        paxos_msg::msg msg = accept;
 
         auto payload = paxos_msg::encode_msg(msg);
 
@@ -353,12 +352,13 @@ bool paxos_node::broadcast_accept(
 
 void paxos_node::broadcast_decision(const paxos_msg::V &value)
 {
-        paxos_msg::msg msg = {
-                .type = paxos_msg::MSG_TYPE::DECIDE,
-                .dec = {value, balnum->slot_num},
-        };
+        paxos_msg::msg msg = paxos_msg::decide_msg {value, balnum->slot_num};
 
-        auto payload = paxos_msg::encode_msg(msg);
+        std::string payload = paxos_msg::encode_msg(msg);
+
+        log[balnum->slot_num] = value;
+        blockchain::BLOCKCHAIN.transact(value);
+        blag::BLAG.transact(value);
 
         pmut.lock();
 
@@ -378,21 +378,16 @@ void paxos_node::broadcast_decision(const paxos_msg::V &value)
 
         pmut.unlock();
 
-        // Proposer commits.
-        // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
-        //  recover from. I don't believe this is part of the spec though.
-
-        log[balnum->slot_num] = value;
-        blockchain::BLOCKCHAIN.transfer(value);
-
         balnum->slot_num += 1;
 }
 
 void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg &proposal)
 {
+        paxos_msg::ballot_num bal = proposal.balnum;
+
         say(fmt::format("Received PREPARE from P_{} with ballot {}",
                         peer_id_of(proposer),
-                        proposal));
+                        bal));
 
         // If the proposal's ballot number is later than the one we've most recently accepted,
         // promise the proposer we will accept no earlier ballot's than theirs by fast-forwarding
@@ -400,19 +395,16 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
 
         // TODO: Not sure when it would be the case that the two are equal, even though we're
         //  defining the relation on less than or equal to.
-        if (*balnum <= proposal) {
-                *balnum = proposal;
+        if (*balnum <= bal) {
+                *balnum = bal;
 
                 paxos_msg::promise_msg promise = {
-                        .balnum = proposal,
-                        .acceptnum = accept_bals[proposal.slot_num],
-                        .acceptval = accept_vals[proposal.slot_num],
+                        .balnum = bal,
+                        .acceptnum = accept_bals[bal.slot_num],
+                        .acceptval = accept_vals[bal.slot_num],
                 };
 
-                paxos_msg::msg msg = {
-                        .type = paxos_msg::MSG_TYPE::PROMISE,
-                        .prom = promise,
-                };
+                paxos_msg::msg msg = paxos_msg::promise_msg {promise};
 
                 auto payload = paxos_msg::encode_msg(msg);
 
@@ -511,12 +503,12 @@ bool paxos_node::receive_accepteds(const TimePoint timeout_time)
 
                 // We only care about this if the node is responding to our most recent ballot.
                 // Otherwise, it's an old promise.
-                if (*balnum != msg)
+                if (*balnum != msg.balnum)
                         continue;
 
                 say(fmt::format("Received ACCEPTED from P_{} to ballot {}.",
                                 peer_id_of(sender),
-                                msg));
+                                msg.balnum));
 
                 n_responses++;
         }
@@ -535,18 +527,13 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                 accept_bals[accept.balnum.slot_num] = accept.balnum;
                 accept_vals[accept.balnum.slot_num] = accept.value;
 
-                paxos_msg::accepted_msg accepted = accept.balnum;
-
-                paxos_msg::msg msg = {
-                        .type = paxos_msg::MSG_TYPE::ACCEPTED,
-                        .accd = accepted,
-                };
+                paxos_msg::msg msg = paxos_msg::accepted_msg {accept.balnum};
 
                 auto payload = paxos_msg::encode_msg(msg);
 
                 // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Sending ACCEPTED to P_{} with ballot {}.",
-                                peer_id_of(proposer), accepted));
+                                peer_id_of(proposer), accept.balnum));
 
                 cs171_cfg::send_with_delay(
                         proposer,
@@ -559,27 +546,26 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
 
 void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision) {
         say(fmt::format("Received DECIDE from P{} for slot {} with value {}.",
-                        peer_id_of(sender), decision.val, decision.slotnum));
+                        peer_id_of(sender), decision.slotnum, decision.val));
 
         set_leader(peers[sender].get());
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
         //  recover from. I don't believe this is part of the spec though.
 
-        log[balnum->slot_num] = decision.val;
-        bool success = blockchain::BLOCKCHAIN.transfer(decision.val);
-
-        if (success) {
-                fmt::print("Success!\n");
-        } else {
-                fmt::print("Insufficient balance.\n");
-        }
-
         // Increase the slot number of our ballot number, which corresponds to the depth of
         // our blockchain. We have decided this slot number, and so our next proposal should
         // try to gain consensus on the next slot.
         if (decision.slotnum > balnum->slot_num) {
                 // need to recover missing gaps in log
+                // TODO: send RECOVER<my_slotnum> to the leader; leader responds
+                //  with every transaction from my_slotnum to decision.slotnum
+
+//                cs171_cfg::send_with_delay(leader, RECOVER_REQ);
+
+                // TODO: don't do this unless we use synchronous I/O for recovery
+//                balnum->slot_num = decision.slotnum + 1;
+
                 // TODO: recover_log();
                 // We tell (leader? someone) that we are missing log[slot] entry.
                 // They send their log value at that slot. If they have a valid
@@ -587,12 +573,22 @@ void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &de
                 // some point in time, so we know it is the correct value. If the peer
                 // doesn't know the log[slot] value, we need to ask someone else!
 
-//                balnum->slot_num = decision.slotnum + 1;
-//                accept_bals[balnum->slot_num] = {0, my_id, balnum->slot_num};
+        } else {
+                assert(decision.slotnum == balnum->slot_num);
+
+                blockchain::BLOCKCHAIN.transact(decision.val);
+                blag::BLAG.transact(decision.val);
+                balnum->slot_num++;
         }
 
-        balnum->slot_num++;
-        accept_bals[balnum->slot_num] = {0, my_id, balnum->slot_num};
+        log[decision.slotnum] = decision.val;
+
+        // this handles the else (non-restore) case, as well as "pre-handling" the restore case
+//        accept_bals[decision.slotnum + 1] = {0, my_id, decision.slotnum + 1};
+
+
+        // initialize new accept_bal
+
 }
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
@@ -600,37 +596,37 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
         pmut_guard lk {pmut};
 
         DBG("Received {} message from peer P{}\n",
-            paxos_msg::msg_types[m.type],
+            paxos_msg::msg_types[m.index()],
             peers.at(sender)->client_id);
 
-        switch (m.type) {
+        switch (m.index()) {
             case paxos_msg::PREPARE: {
-                receive_prepare(sender, m.prep);
+                receive_prepare(sender, std::get<paxos_msg::prepare_msg>(m));
                 break;
             }
 
             case paxos_msg::PROMISE: {
-                prom_q.push({sender, m.prom});
+                prom_q.push({sender, std::get<paxos_msg::promise_msg>(m)});
                 break;
             }
 
             case paxos_msg::ACCEPT: {
-                receive_accept(sender, m.acc);
+                receive_accept(sender, std::get<paxos_msg::accept_msg>(m));
                 break;
             }
 
             case paxos_msg::ACCEPTED: {
-                acc_q.push({sender, m.accd});
+                acc_q.push({sender, std::get<paxos_msg::accepted_msg>(m)});
                 break;
             }
 
             case paxos_msg::DECIDE: {
-                receive_decide(sender, m.dec);
+                receive_decide(sender, std::get<paxos_msg::decide_msg>(m));
                 break;
             }
 
             case paxos_msg::FWD_VAL: {
-                propose(m.fwd);
+                propose(std::get<paxos_msg::fwd_msg>(m).val);
                 break;
             }
 
@@ -752,7 +748,7 @@ void paxos_node::forward_msg(const peer_connection *dest, const paxos_msg::V &va
 {
         DBG("Forwarding message '{}' to P{}\n", val, dest->client_id);
 
-        paxos_msg::msg m = {.type = paxos_msg::FWD_VAL, .fwd = val};
+        paxos_msg::msg m = paxos_msg::fwd_msg {val};
         std::string payload = paxos_msg::encode_msg(m);
 
         cs171_cfg::send_with_delay(dest->sock,

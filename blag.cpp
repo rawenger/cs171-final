@@ -8,6 +8,8 @@
 
 #include "blag.h"
 
+blag blag::BLAG;
+
 auto blag::transact(transaction trans) -> void
 {
         if (std::holds_alternative<post_transaction>(trans)) {
@@ -19,7 +21,7 @@ auto blag::transact(transaction trans) -> void
                         .author = post_trans.author,
                         .title = post_trans.title,
                         .body = post_trans.body,
-                        .comments = std::vector<comment>(),
+                        .comments = {},
                         .stamp = stamp,
                 };
                 posts.insert(std::make_pair(stamp, post));
@@ -32,16 +34,18 @@ auto blag::transact(transaction trans) -> void
                         // TODO: Silently fail if there is no blog with this title.
                         return;
                 }
-                comment comment = std::make_pair(comm_trans.commenter, comm_trans.comment);
-                comment_on->comments.push_back(comment);
+
+                comment comm {comm_trans.commenter, comm_trans.comment};
+
+                comment_on->comments.push_back(comm);
         }
 }
 
-auto blag::find_post_with_title(const content &title) -> post *
+auto blag::find_post_with_title(std::string_view title) -> post *
 {
-        for (auto &&finger = posts.begin(); finger != posts.end(); ++finger) {
-                if (finger->second.title == title) {
-                        return &finger->second;
+        for (auto &[_, post] : posts) {
+                if (post.title == title) {
+                        return &post;
                 }
         }
 
@@ -49,36 +53,36 @@ auto blag::find_post_with_title(const content &title) -> post *
 }
 
 // Make a new blog post identified by the given title. 
-auto blag::new_post(user author, content title, content body) -> void
-{
-        // TODO: Don't default-initialize, find the magical candidate function that does it in place.
-        transaction trans;
-        post_transaction post_trans = {
-                .author = author,
-                .title = title,
-                .body = body,
-        };
-        trans = post_trans;
-        transact(trans);
-}
+//auto blag::new_post(user author, content title, content body) -> void
+//{
+//        // TODO: Don't default-initialize, find the magical candidate function that does it in place.
+//        transaction trans;
+//        post_transaction post_trans = {
+//                .author = author,
+//                .title = title,
+//                .body = body,
+//        };
+//        trans = post_trans;
+//        transact(trans);
+//}
 
 // Make a new comment under the blog post with the given title.
-auto blag::new_comment(content title, user commenter, content comment) -> void
-{
-        transaction trans;
-        comment_transaction comm_trans = {
-                .commenter = commenter,
-                .title = title,
-                .comment = comment,
-        };
-        trans = comm_trans;
-        transact(trans);
-}
+//auto blag::new_comment(content title, user commenter, content comment) -> void
+//{
+//        transaction trans;
+//        comment_transaction comm_trans = {
+//                .commenter = std::move(commenter),
+//                .title = std::move(title),
+//                .comment = std::move(comment),
+//        };
+//        trans = comm_trans;
+//        transact(trans);
+//}
 
 // List the title and author of all blog posts in chronological order.
 auto blag::all_posts(std::ostream &out) -> void
 {
-        if (posts.size() > 0) {
+        if (!posts.empty()) {
                 for (auto &&finger = posts.begin(); finger != posts.end(); ++finger) {
                         const post &post = finger->second;
                         out << fmt::format("@{}: '{}' -- ", post.author, post.title);
@@ -90,10 +94,10 @@ auto blag::all_posts(std::ostream &out) -> void
 }
 
 // List the title and content of all blog posts made by this user in chronological order.
-auto blag::all_posts_by(user author, std::ostream &out) -> void
+auto blag::all_posts_by(std::string_view author, std::ostream &out) -> void
 {
         size_t found = 0;
-        for (auto &&finger = posts.begin(); finger != posts.end(); ++finger) {
+        for (auto finger = posts.begin(); finger != posts.end(); ++finger) {
                 const post &post = finger->second;
                 if (post.author == author) {
                         out << fmt::format("@{}: '{}' -- ", post.author, post.title);
@@ -109,7 +113,7 @@ auto blag::all_posts_by(user author, std::ostream &out) -> void
 }
 
 // List the content of the given blog post and its comments, including commenter and content.
-auto blag::view_comments(content title, std::ostream &out) -> void
+auto blag::view_comments(std::string_view title, std::ostream &out) -> void
 {
         const post *post = find_post_with_title(title);
 
@@ -119,9 +123,9 @@ auto blag::view_comments(content title, std::ostream &out) -> void
                 out << fmt::format("@{}: '{}' -- ", post->author, post->title);
                 out << "[stamped: " << post->stamp << "]" << std::endl; // TODO: Good god the format library.
                 out << "    > " << post->body << std::endl;
-                if (post->comments.size() > 0) {
+                if (!post->comments.empty()) {
                         for (const comment &comment : post->comments) {
-                                out << "    " << fmt::format("@{}: {}", comment.first, comment.second) << std::endl;
+                                out << "    " << fmt::format("@{}: {}", comment.user, comment.content) << std::endl;
                         }
                 } else {
                         out << "    " << "@cricket: just me in here? lol" << std::endl;
@@ -130,6 +134,7 @@ auto blag::view_comments(content title, std::ostream &out) -> void
 
 }
 
+/*
 auto dummy_transactions(std::ostream &out) -> void
 {
         blag cool_peeps;
@@ -157,3 +162,4 @@ auto dummy_transactions(std::ostream &out) -> void
         );
         cool_peeps.all_posts(std::cout);
 }
+*/

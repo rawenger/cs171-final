@@ -9,41 +9,46 @@
 #include <optional>
 #include <cassert>
 
-
 #include "cs171_cfg.h"
 #include "blockchain.h"
 
 extern cs171_cfg::node_id_t my_id;
 
 namespace paxos_msg {
-    using V = transaction;
+    using V = blag::transaction;
 
     static constexpr const char *msg_types[] = {
-            "DUPLICATE",
-            "HANDSHAKE_COMPLETE",
             "PREPARE", // propose
             "PROMISE",
             "ACCEPT",
             "ACCEPTED",
             "DECIDE",
             "FWD_VAL",
+            "RECOVER_REQ",
+            "RECOVER_RESP",
+            // NOTE: No entries after these.
+            "DUPLICATE",
+            "HANDSHAKE_COMPLETE",
     };
 
     enum MSG_TYPE : uint8_t {
-        // messages sent during initial connection handshake
-        DUPLICATE = 0, // a connection between these 2 nodes already exists--we can safely close the new one
-        HANDSHAKE_COMPLETE,
-
         /* types that include additional data */
-        PREPARE, // propose
+        PREPARE = 0, // propose
         PROMISE,
         ACCEPT,
         ACCEPTED,
         DECIDE,
 
         FWD_VAL, // value forwarded to "known leader"
+        RECOVER_REQ,
+        RECOVER_RESP,
 
         /* no additional data needs to be read */
+       // NOTE: Please don't put any enumerations after these. I beg you.
+       // messages sent during initial connection handshake
+       DUPLICATE, // a connection between these 2 nodes already exists--we can safely close the new one
+       HANDSHAKE_COMPLETE,
+
     };
 
     struct ballot_num {
@@ -56,6 +61,7 @@ namespace paxos_msg {
         { }
 
         ballot_num() = default;
+        ballot_num(const ballot_num &other) = default;
 
         template <class Archive>
         void serialize(Archive &ar)
@@ -99,14 +105,37 @@ namespace paxos_msg {
         }
     };
 
-    using prepare_msg = ballot_num;
-//    using accept_msg = ballot_num; // also needs value
-    using accepted_msg = ballot_num;
-    using fwd_msg = V;
+    struct prepare_msg {
+            ballot_num balnum;
+
+            template<class Archive>
+            void serialize(Archive &ar)
+            { ar(balnum); }
+    };
+
+    struct accepted_msg {
+            ballot_num balnum;
+
+            template<class Archive>
+            void serialize(Archive &ar)
+            { ar(balnum); }
+    };
+
+    struct fwd_msg {
+            V val;
+
+            template<class Archive>
+            void serialize(Archive &ar)
+            { ar(val); }
+    };
 
     struct decide_msg {
         V val;
         size_t slotnum;
+
+        template<class Archive>
+        void serialize(Archive &ar)
+        { ar(val); ar(slotnum); }
     };
 
     struct promise_msg {
@@ -121,26 +150,32 @@ namespace paxos_msg {
         ballot_num acceptnum;
 
         std::optional<V> acceptval; // only if we accepted something already (this is the value that we accepted)
+
+        template<class Archive>
+        void serialize(Archive &ar)
+        { ar(balnum); ar(acceptnum); ar(acceptval); }
     };
 
     struct accept_msg {
         ballot_num balnum;
         V value;
-    };
-
-    struct msg {
-        MSG_TYPE type;
-
-        union {
-            prepare_msg prep;
-            promise_msg prom;
-            accept_msg acc;
-            accepted_msg accd;
-            decide_msg dec;
-            fwd_msg fwd;
-        };
 
         template<class Archive>
+        void serialize(Archive &ar)
+        { ar(balnum); ar(value); }
+    };
+
+    // NOTE: has to match order above in msg_types array
+    using msg = std::variant<prepare_msg,
+                             promise_msg,
+                             accept_msg,
+                             accepted_msg,
+                             decide_msg,
+                             fwd_msg
+                             >;
+
+    /*
+     template<class Archive>
         void serialize(Archive &ar) {
             ar(type);
             switch (type) {
@@ -153,9 +188,9 @@ namespace paxos_msg {
                 default: break;
             }
         }
-    };
+     */
 
-    std::string encode_msg(msg m);
+    std::string encode_msg(const msg &m);
     msg decode_msg(const std::string &data);
 }
 

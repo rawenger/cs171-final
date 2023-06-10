@@ -52,7 +52,8 @@ static EVP_MD_CTX *sha256_ctx;
 
 std::string format_as(transaction tr)
 {
-        return fmt::format("P{} -${}-> P{}", tr.sender, tr.amt, tr.receiver);
+//        return fmt::format("P{} -${}-> P{}", tr.sender, tr.amt, tr.receiver);
+        return "transaction{}";
 }
 
 //template<>
@@ -158,32 +159,17 @@ blockchain::~blockchain()
         delete tail;
 }
 
-bool blockchain::transfer(transaction t)
+bool blockchain::transact(transaction t)
 {
 //        lock_gd lk{mut};
 
-        if (balance(t.sender) < t.amt) {
-                return false;
-        }
+//        if (balance(t.sender) < t.amt) {
+//                return false;
+//        }
 
         tail = new block(t, tail);
 
         return true;
-}
-
-int blockchain::balance(int client)
-{
-//        lock_gd lk{mut};
-
-        int bal = 10;
-
-        for (block *cur = this->tail; cur; cur = cur->P) {
-                if (cur->T.sender == client)
-                        bal -= cur->T.amt;
-                if (cur->T.receiver == client)
-                        bal += cur->T.amt;
-        }
-        return bal;
 }
 
 std::string blockchain::get_history()
@@ -191,8 +177,6 @@ std::string blockchain::get_history()
         /* Not many options for optimized prepending to strings/buffers in C++...
          * We'll just have to do it *suboptimally*.
          */
-//        lock_gd lk{mut};
-
         if (!tail)
                 return "[]";
 
@@ -208,27 +192,3 @@ std::string blockchain::get_history()
 
 }
 
-std::string blockchain::get_balances() {
-//        lock_gd lk{mut};
-        std::map<uint16_t, int> bals; // ID : balance
-        constexpr int starting_balance = 10;
-
-        for (block *cur = this->tail; cur; cur = cur->P) {
-                uint16_t send = cur->T.sender, recv = cur->T.receiver, amt = cur->T.amt;
-                if (!bals.contains(send))
-                        bals[send] = starting_balance - amt;
-                else
-                        bals[send] -= amt;
-
-                if (!bals.contains(recv))
-                        bals[recv] = starting_balance + amt;
-                else
-                        bals[recv] += amt;
-        }
-
-        std::vector<std::string> res;
-        for (auto client : bals)
-                res.push_back(fmt::format("P{}: ${}", client.first, client.second));
-
-        return fmt::format("{}", fmt::join(res, ", "));
-}

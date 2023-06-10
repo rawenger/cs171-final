@@ -8,37 +8,62 @@
 #include <vector>
 
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/variant.hpp>
 
-auto dummy_transactions(std::ostream &out) -> void;
-
-class blag
-{
-        private:
-
-        using user = std::string;
-        using content = std::string;
+class blag {
+private:
+        static constexpr size_t max_string_size = 128;
+        using user = char[max_string_size];
+        using content = char[max_string_size];
 	using timestamp = std::chrono::nanoseconds;
 
-        using comment = std::pair<user, content>;
-        using post = struct {
-                user author;
-                content title;
-                content body;
-                std::vector<comment> comments;
+        using raw_comment = std::pair<user, content>;
+
+        struct comment {
+                std::string user;
+                std::string content;
+        };
+
+        struct post {
+                std::string author {};
+                std::string title {};
+                std::string body {};
+                std::vector<comment> comments {};
                 timestamp stamp;
         };
+
+        blag() = default;
 
 	// TODO: Discriminating posts by nanosecond resolution is a Very Bad Idea (TM).
 	std::map<timestamp, post> posts;
 
-	auto find_post_with_title(const content &title) -> post *;
+	auto find_post_with_title(std::string_view title) -> post *;
 
-	public:
+public:
+        static blag BLAG;
 
         struct post_transaction {
-                user author;
-                content title;
-                content body;
+                post_transaction(std::string &&author,
+                                 std::string &&title,
+                                 std::string &&body)
+                {
+                    std::strncpy(this->author, author.c_str(), max_string_size);
+                    std::strncpy(this->title, title.c_str(), max_string_size);
+                    std::strncpy(this->body, body.c_str(), max_string_size);
+                }
+
+//                post_transaction(user author, content title, content body)
+//                {
+//                    std::strncpy(this->author, author, max_string_size);
+//                    std::strncpy(this->title, title, max_string_size);
+//                    std::strncpy(this->body, body, max_string_size);
+//                }
+
+                post_transaction() = default;
+
+                user author {0};
+                content title {0};
+                content body {0};
 
 		template <class Archive>
 		void serialize(Archive &ar) {
@@ -47,9 +72,20 @@ class blag
         };
 
         struct comment_transaction {
-                user commenter;
-                content title;
-                content comment;
+                comment_transaction(std::string &&commenter,
+                                    std::string &&title,
+                                    std::string &&comment)
+                {
+                    std::strncpy(this->commenter, commenter.c_str(), max_string_size);
+                    std::strncpy(this->title, title.c_str(), max_string_size);
+                    std::strncpy(this->comment, comment.c_str(), max_string_size);
+                }
+
+                comment_transaction() = default;
+
+                user commenter {0};
+                content title {0};
+                content comment {0};
 
 		template <class Archive>
 		void serialize(Archive &ar) {
@@ -59,20 +95,23 @@ class blag
 
 	using transaction = std::variant<post_transaction, comment_transaction>;
 
+        blag(const blag &other) = delete;
+        blag(blag &&other) = delete;
+
         auto transact(transaction trans) -> void;
 
         // Make a new blog post identified by the given title. 
-        auto new_post(user author, content title, content body) -> void;
+//        auto new_post(user author, content title, content body) -> void;
 
         // Make a new comment under the blog post with the given title.
-        auto new_comment(content title, user commenter, content comment) -> void;
+//        auto new_comment(content title, user commenter, content comment) -> void;
 
         // List the title and author of all blog posts in chronological order.
         auto all_posts(std::ostream &out) -> void;
 
         // List the title and content of all blog posts made by this user in chronological order.
-        auto all_posts_by(user author, std::ostream &out) -> void;
+        auto all_posts_by(std::string_view author, std::ostream &out) -> void;
 
         // List the content of the given blog post and its comments, including commenter and content.
-        auto view_comments(content title, std::ostream &out) -> void;
+        auto view_comments(std::string_view title, std::ostream &out) -> void;
 };

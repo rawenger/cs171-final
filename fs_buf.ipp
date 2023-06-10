@@ -148,4 +148,6 @@ void fs_buf<T>::reserve(size_t n_entries) {
         newsize = round_to_pagesize(newsize);
 
         this->grow_to(newsize);
+
+        // TODO: default construct new elements
 }

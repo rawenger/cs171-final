@@ -5,10 +5,10 @@
 
 #include "cli_interface.h"
 
-static auto parse_list(const std::string_view text) -> input::arguments;
-static auto parse_call(const std::string_view text) -> std::optional<input::call>;
-static auto parse_name(const std::string_view text) -> std::optional<input::KIND>;
-static auto parse_pid(const std::string_view text) -> std::optional<input::pid>;
+static auto parse_list(std::string_view text) -> input::arguments;
+static auto parse_call(std::string_view text) -> std::optional<input::call>;
+static auto parse_name(std::string_view text) -> std::optional<input::KIND>;
+static auto parse_pid(std::string_view text) -> std::optional<input::pid>;
 
 auto parse_input(const std::string_view text) -> std::optional<input>
 {
@@ -94,8 +94,8 @@ auto parse_input(const std::string_view text) -> std::optional<input>
             }
 
             input.post.author = args[0];
-            input.post.title = args[2];
-            input.post.body = args[3];
+            input.post.title = args[1];
+            input.post.body = args[2];
             break;
         }
 
@@ -198,8 +198,18 @@ static auto parse_name(const std::string_view text) -> std::optional<input::KIND
         kind = input::KIND::QUEUE;
     } else if (text == "log") {
         kind = input::KIND::LOG;
-    } else if (text == "transfer") {
-            kind = input::KIND::TRANSACTION;
+    } else if (text == "transact") {
+        kind = input::KIND::TRANSACTION;
+    } else if (text == "post") {
+        kind = input::KIND::POST;
+    } else if (text == "comment") {
+        kind = input::KIND::COMMENT;
+    } else if (text == "blog") {
+        kind = input::KIND::BLOG;
+    } else if (text == "view") {
+        kind = input::KIND::VIEW;
+    } else if (text == "read") {
+        kind = input::KIND::READ;
     }
 
     return kind;

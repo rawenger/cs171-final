@@ -14,7 +14,6 @@
 #include "fs_buf.h"
 #include "cs171_cfg.h"
 
-
 using cs171_cfg::socket_t, cs171_cfg::node_id_t;
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port);

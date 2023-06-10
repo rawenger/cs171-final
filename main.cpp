@@ -17,18 +17,21 @@
 #include <cassert>
 #include <forward_list>
 
+#include <cereal/archives/json.hpp>
+
+#include <fmt/core.h>
+
 #include "debug.h"
 #include "sema_q.h"
 #include "cs171_cfg.h"
 #include "paxos_node.h"
 #include "cli_interface.h"
+#include "blag.h"
 
-node_id_t my_id;
+cs171_cfg::node_id_t my_id;
 static std::string my_hostname;
 
 cs171_cfg::system_cfg *config {nullptr};
-
-#include "blag.h"
 
 int main(int argc, char **argv)
 {
@@ -88,13 +91,13 @@ int main(int argc, char **argv)
                         }
                         break;
                     }
-                    case input::KIND::TRANSACTION: {
-                        auto [dest, amt] = cmd->transaction;
-                        cs171_cfg::node_id_t sender = node.id();
-
-                        node.propose({amt, sender, dest});
-                        break;
-                    }
+//                    case input::KIND::TRANSACTION: {
+//                        auto [dest, amt] = cmd->transaction;
+//                        cs171_cfg::node_id_t sender = node.id();
+//
+//                        node.propose({amt, sender, dest});
+//                        break;
+//                    }
                     case input::KIND::BLOCKCHAIN:
                         fmt::print("{}\n", blockchain::BLOCKCHAIN.get_history());
                         break;
@@ -103,6 +106,29 @@ int main(int argc, char **argv)
                         break;
                     case input::KIND::LOG:
                         fmt::print("{}\n", node.dump_log());
+                        break;
+                    case input::KIND::POST:
+                        node.propose(blag::post_transaction{
+                                std::string(cmd->post.author),
+                                std::string(cmd->post.title),
+                                std::string(cmd->post.body),
+                        });
+                        break;
+                    case input::KIND::COMMENT:
+                        node.propose(blag::comment_transaction{
+                                std::string(cmd->comment.commenter),
+                                std::string(cmd->comment.title),
+                                std::string(cmd->comment.comment),
+                        });
+                        break;
+                    case input::KIND::BLOG:
+                        blag::BLAG.all_posts(std::cout);
+                        break;
+                    case input::KIND::VIEW:
+                        blag::BLAG.all_posts_by(cmd->view.author, std::cout);
+                        break;
+                    case input::KIND::READ:
+                        blag::BLAG.view_comments(cmd->read.title, std::cout);
                         break;
                 }
         }

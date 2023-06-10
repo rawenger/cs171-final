@@ -7,13 +7,16 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/optional.hpp>
 #include <cereal/types/tuple.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/variant.hpp>
+
 #include <sstream>
 
 #include <fmt/core.h>
 
 #include "paxos_msg.h"
 
-std::string paxos_msg::encode_msg(paxos_msg::msg m)
+std::string paxos_msg::encode_msg(const msg &m)
 {
         std::stringstream ss;
         {
@@ -33,7 +36,7 @@ std::string paxos_msg::encode_msg(paxos_msg::msg m)
 paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
 {
         std::stringstream ss{data};
-        paxos_msg::msg res{};
+        paxos_msg::msg res {};
         {
                 cereal::PortableBinaryInputArchive deserial{ss};
                 deserial(res);
