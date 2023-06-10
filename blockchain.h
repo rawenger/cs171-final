@@ -26,11 +26,6 @@ using u256 = std::array<uint8_t, 32>;
 
 using transaction = blag::transaction;
 
-// blockchain.cpp uses its own custom transaction formatter
-//#ifndef DISABLE_TRANSACTION_FORMAT_AS
-std::string format_as(transaction tr);
-//#endif
-
 class blockchain {
     struct block {
         explicit block(transaction t, block *prev=nullptr);

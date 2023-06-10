@@ -34,7 +34,6 @@ private:
 
         blag() = default;
 
-	// TODO: Discriminating posts by nanosecond resolution is a Very Bad Idea (TM).
 	std::map<timestamp, post> posts;
 
 	auto find_post_with_title(std::string_view title) -> post *;
@@ -42,6 +41,7 @@ private:
 public:
         static blag BLAG;
 
+        // TODO: this would be much cleaner if done using polymorphism
         struct post_transaction {
                 post_transaction(std::string &&author,
                                  std::string &&title,
@@ -115,3 +115,7 @@ public:
         // List the content of the given blog post and its comments, including commenter and content.
         auto view_comments(std::string_view title, std::ostream &out) -> void;
 };
+
+std::string format_as(const blag::post_transaction &pt);
+std::string format_as(const blag::comment_transaction &ct);
+std::string format_as(const blag::transaction &tr);

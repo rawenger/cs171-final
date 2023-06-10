@@ -50,11 +50,6 @@ static EVP_MD_CTX *sha256_ctx;
 //    }
 //};
 
-std::string format_as(transaction tr)
-{
-//        return fmt::format("P{} -${}-> P{}", tr.sender, tr.amt, tr.receiver);
-        return "transaction{}";
-}
 
 //template<>
 //struct fmt::formatter<blockchain::block> {

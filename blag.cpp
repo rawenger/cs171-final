@@ -107,6 +107,36 @@ auto blag::view_comments(std::string_view title, std::ostream &out) -> void
         }
 }
 
+std::string format_as(const blag::post_transaction &pt)
+{
+        constexpr size_t trim_length = 8;
+        return fmt::format("(post by @{}: \"{}\")",
+                           pt.author,
+                           std::string_view{pt.title, trim_length});
+}
+
+std::string format_as(const blag::comment_transaction &ct)
+{
+        constexpr size_t trim_length = 8;
+        return fmt::format(R"((comment by @{} on post "{}": "{}"))",
+                           ct.commenter,
+                           std::string_view{ct.title, trim_length},
+                           std::string_view{ct.comment, trim_length});
+}
+
+// see https://en.cppreference.com/w/cpp/utility/variant/visit
+template<class... Ts>
+struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
+std::string format_as(const blag::transaction &tr)
+{
+        return std::visit(overloaded{
+                        [](const auto &arg) { return format_as(arg); }
+                }, tr);
+}
+
 // Make a new blog post identified by the given title.
 //auto blag::new_post(user author, content title, content body) -> void
 //{
