@@ -411,7 +411,7 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
                         .acceptval = accept_vals[bal.slot_num],
                 };
 
-                paxos_msg::promise_msg msg {promise};
+                paxos_msg::promise_msg msg{promise};
 
                 auto payload = paxos_msg::encode_msg(msg);
 
@@ -428,7 +428,10 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
                         0,
                         "Choked on a PROMISE message"
                 );
-        } else if (my_state == LEARNER) {
+//        } else if (my_state == LEARNER) {
+        // NOTE: this second way is much less efficient BUT it fixes the case
+        //  where we hang forever when we aren't connected to any leader
+        } else if (first_uncommitted_slot > bal.slot_num) {
                 issue_logresp(proposer, bal.slot_num);
         }
 }
@@ -606,7 +609,7 @@ void paxos_node::issue_logresp(cs171_cfg::socket_t dest, size_t slotnum)
 {
         std::forward_list<paxos_msg::V> vals {};
         auto tail = vals.before_begin();
-        for (size_t i = slotnum; i < balnum->slot_num; i++)
+        for (size_t i = slotnum; i < first_uncommitted_slot; i++)
                 tail = vals.insert_after(tail, *log[i]);
 
         paxos_msg::logresp_msg response {
