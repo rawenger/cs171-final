@@ -8,6 +8,7 @@
 #include <tuple>
 #include <optional>
 #include <cassert>
+#include <forward_list>
 
 #include "cs171_cfg.h"
 #include "blockchain.h"
@@ -16,6 +17,8 @@ extern cs171_cfg::node_id_t my_id;
 
 namespace paxos_msg {
     using V = blag::transaction;
+
+    using msg_size_t = uint16_t;
 
     static constexpr const char *msg_types[] = {
             "PREPARE", // propose
@@ -44,11 +47,10 @@ namespace paxos_msg {
         RECOVER_RESP,
 
         /* no additional data needs to be read */
-       // NOTE: Please don't put any enumerations after these. I beg you.
-       // messages sent during initial connection handshake
-       DUPLICATE, // a connection between these 2 nodes already exists--we can safely close the new one
-       HANDSHAKE_COMPLETE,
-
+        // NOTE: Please don't put any enumerations after these. I beg you.
+        // messages sent during initial connection handshake
+        DUPLICATE, // a connection between these 2 nodes already exists--we can safely close the new one
+        HANDSHAKE_COMPLETE,
     };
 
     struct ballot_num {
@@ -165,30 +167,35 @@ namespace paxos_msg {
         { ar(balnum); ar(value); }
     };
 
-    // NOTE: has to match order above in msg_types array
-    using msg = std::variant<prepare_msg,
-                             promise_msg,
-                             accept_msg,
-                             accepted_msg,
-                             decide_msg,
-                             fwd_msg
-                             >;
+    // recover request message
+    struct logreq_msg {
+        size_t slot; // first slot # for which decision is unknown
 
-    /*
-     template<class Archive>
-        void serialize(Archive &ar) {
-            ar(type);
-            switch (type) {
-                case PREPARE: ar(prep); break;
-                case PROMISE: ar(prom.balnum, prom.acceptnum, prom.acceptval); break;
-                case ACCEPT: ar(acc.balnum, acc.value); break;
-                case ACCEPTED: ar(accd); break;
-                case DECIDE: ar(dec.val); ar(dec.slotnum); break;
-                case FWD_VAL: ar(fwd); break;
-                default: break;
-            }
-        }
-     */
+        template<class Archive>
+        void serialize(Archive &ar)
+        { ar(slot); }
+    };
+
+    // recover response message
+    struct logresp_msg {
+        size_t slot;
+        std::forward_list<V> vals;
+
+        template<class Archive>
+        void serialize(Archive &ar)
+        { ar(slot); ar(vals); }
+    };
+
+    // NOTE: has to match order above in msg_types array
+    using msg = std::variant< prepare_msg,
+                              promise_msg,
+                              accept_msg,
+                              accepted_msg,
+                              decide_msg,
+                              fwd_msg,
+                              logreq_msg,
+                              logresp_msg
+                            >;
 
     std::string encode_msg(const msg &m);
     msg decode_msg(const std::string &data);

@@ -9,6 +9,7 @@
 #include <cereal/types/tuple.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/variant.hpp>
+#include <cereal/types/forward_list.hpp>
 
 #include <sstream>
 
@@ -27,8 +28,8 @@ std::string paxos_msg::encode_msg(const msg &m)
         std::string res, str;
         str = ss.str();
 
-        auto len = htons(static_cast<uint16_t>(str.size()));
-        res.append(reinterpret_cast<char *>(&len), 2);
+        auto len = htons(static_cast<msg_size_t>(str.size()));
+        res.append(reinterpret_cast<char *>(&len), sizeof(msg_size_t));
 
         return std::move(res) + std::move(str);
 }

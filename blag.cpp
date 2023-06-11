@@ -12,12 +12,12 @@
 
 blag blag::BLAG;
 
-auto blag::transact(transaction trans) -> void
+auto blag::transact(const transaction &trans) -> void
 {
         if (std::holds_alternative<post_transaction>(trans)) {
                 // Commit a post to the blog.
                 timestamp stamp = std::chrono::system_clock::now();
-                const post_transaction &post_trans = std::get<post_transaction>(trans);
+                const auto &post_trans = std::get<post_transaction>(trans);
                 post post = {
                         .author = post_trans.author,
                         .title = post_trans.title,
@@ -29,7 +29,7 @@ auto blag::transact(transaction trans) -> void
         }
         else if (std::holds_alternative<comment_transaction>(trans)) {
                 // Commit a comment to the blog.
-                const comment_transaction &comm_trans = std::get<comment_transaction>(trans);
+                const auto &comm_trans = std::get<comment_transaction>(trans);
                 post *comment_on = find_post_with_title(comm_trans.title);
                 if (comment_on == nullptr) {
                         // TODO: Silently fail if there is no blog with this title.

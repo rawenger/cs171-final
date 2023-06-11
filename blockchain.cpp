@@ -83,7 +83,7 @@ std::string format_as(const blockchain::block &blk)
 }
 
 
-blockchain::block::block(transaction t, block *prev)
+blockchain::block::block(const transaction &t, block *prev)
  :      P(prev),
         N(0),
         T(t)
@@ -154,7 +154,7 @@ blockchain::~blockchain()
         delete tail;
 }
 
-bool blockchain::transact(transaction t)
+bool blockchain::transact(const transaction &t)
 {
 //        lock_gd lk{mut};
 

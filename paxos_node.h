@@ -29,7 +29,7 @@ struct peer_connection {
     peer_connection(const peer_connection &other) = delete;
     peer_connection &operator=(const peer_connection &other) = delete;
 
-    void disconnect()
+    void disconnect() const
     { shutdown(sock, SHUT_RDWR); close(sock); }
 
     ~peer_connection() { disconnect(); }
@@ -77,6 +77,8 @@ class paxos_node {
     fs_buf<std::optional<paxos_msg::V>> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
     fs_buf<std::optional<paxos_msg::V>> accept_vals;
+    size_t first_uncommitted_slot {1}; // latest slot num we have received a DECISION for
+    bool awaiting_logresp{false};
 
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::promise_msg>> prom_q {};
     sema_q<std::tuple<cs171_cfg::socket_t, paxos_msg::accepted_msg>> acc_q {};
@@ -113,12 +115,21 @@ class paxos_node {
     bool broadcast_accept(const paxos_msg::V &value, const std::vector<cs171_cfg::socket_t> &targets);
     void broadcast_decision(const paxos_msg::V &value);
 
+    void issue_logreq(cs171_cfg::socket_t dest, size_t slotnum);
+    void issue_logresp(cs171_cfg::socket_t dest, size_t slotnum);
+    void receive_logreq(cs171_cfg::socket_t sender, const paxos_msg::logreq_msg &m);
+    void receive_logresp(const paxos_msg::logresp_msg &m);
+
     void say(std::string &&something) const;
 
     cs171_cfg::node_id_t peer_id_of(cs171_cfg::socket_t peer);
 
     bool has_connection_to(cs171_cfg::node_id_t id);
     bool connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_type &peer);
+
+    void commit(const paxos_msg::V &val)
+    { blockchain::BLOCKCHAIN.transact(val);
+                blag::BLAG.transact(val); }
 
 public:
     paxos_node(node_id_t my_id, std::string node_hostname);

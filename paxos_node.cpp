@@ -50,7 +50,7 @@ struct fmt::formatter<paxos_msg::ballot_num> {
 
 std::unique_ptr<sockaddr> hostname_lookup(const std::string &hostname, int port)
 {
-         addrinfo addr_hint = {
+        addrinfo addr_hint = {
                 .ai_family = AF_INET,
                 .ai_socktype = SOCK_STREAM,
         };
@@ -133,7 +133,7 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                         if (!(pfd.revents & POLLIN))
                                 continue;
 
-                        uint16_t msg_size;
+                        paxos_msg::msg_size_t msg_size;
                         recv(pfd.fd, &msg_size, 2, 0);
                         msg_size = ntohs(msg_size);
 
@@ -180,10 +180,11 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
 
         // reconstruct the blockchain; we can assume
         //  that we don't have any holes in the log
-        for (size_t i = 1; log[i].has_value(); i++) {
-                blockchain::BLOCKCHAIN.transact(*log[i]);
-                blag::BLAG.transact(*log[i]);
+        size_t i;
+        for (i = 1; log[i].has_value(); i++) {
+                commit(*log[i]);
         }
+        first_uncommitted_slot = i;
 
         my_state = PREPARER;
 
@@ -294,7 +295,7 @@ std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &val
         balnum->seq_num += 1;
         balnum->node_pid = my_id;
 
-        paxos_msg::msg msg = paxos_msg::prepare_msg {*balnum};
+        paxos_msg::prepare_msg msg {*balnum};
 
         auto payload = paxos_msg::encode_msg(msg);
         pmut.lock();
@@ -307,7 +308,7 @@ std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &val
                         peer,
                         payload.c_str(), payload.size(),
                         0,
-                        "Choked on broadcasting a PREPARE message."
+                        "Choked on a PREPARE message"
                 );
         }
         pmut.unlock();
@@ -328,9 +329,7 @@ bool paxos_node::broadcast_accept(
 
         accept.balnum.node_pid = my_id;
 
-        paxos_msg::msg msg = accept;
-
-        auto payload = paxos_msg::encode_msg(msg);
+        auto payload = paxos_msg::encode_msg(accept);
 
         pmut.lock();
         for (const auto &peer : targets) {
@@ -346,7 +345,7 @@ bool paxos_node::broadcast_accept(
                         peer,
                         payload.c_str(), payload.size(),
                         0,
-                        "Choked on broadcasting a ACCEPT message."
+                        "Choked on an ACCEPT message"
                 );
         }
         pmut.unlock();
@@ -358,13 +357,12 @@ bool paxos_node::broadcast_accept(
 
 void paxos_node::broadcast_decision(const paxos_msg::V &value)
 {
-        paxos_msg::msg msg = paxos_msg::decide_msg {value, balnum->slot_num};
+        paxos_msg::decide_msg msg {value, balnum->slot_num};
 
         std::string payload = paxos_msg::encode_msg(msg);
 
         log[balnum->slot_num] = value;
-        blockchain::BLOCKCHAIN.transact(value);
-        blag::BLAG.transact(value);
+        commit(value);
 
         pmut.lock();
 
@@ -378,11 +376,14 @@ void paxos_node::broadcast_decision(const paxos_msg::V &value)
                         peer,
                         payload.c_str(), payload.size(),
                         0,
-                        "Choked on a DECIDE message."
+                        "Choked on a DECIDE message"
                 );
         }
 
         pmut.unlock();
+
+        if (first_uncommitted_slot == balnum->slot_num)
+                ++first_uncommitted_slot;
 
         balnum->slot_num += 1;
 }
@@ -410,7 +411,7 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
                         .acceptval = accept_vals[bal.slot_num],
                 };
 
-                paxos_msg::msg msg = paxos_msg::promise_msg {promise};
+                paxos_msg::promise_msg msg {promise};
 
                 auto payload = paxos_msg::encode_msg(msg);
 
@@ -425,8 +426,10 @@ void paxos_node::receive_prepare(socket_t proposer, const paxos_msg::prepare_msg
                         proposer,
                         payload.c_str(), payload.size(),
                         0,
-                        "Choked on a PROMISE message."
+                        "Choked on a PROMISE message"
                 );
+        } else if (my_state == LEARNER) {
+                issue_logresp(proposer, bal.slot_num);
         }
 }
 
@@ -442,8 +445,6 @@ paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval
 
         std::vector<paxos_msg::promise_msg> promises_with_value {};
 
-//        promise_promise returnval {{}, {propval}};
-
         std::vector<cs171_cfg::socket_t> retvec {};
 
         size_t peers_for_majority = (n_peers + 1) / 2;
@@ -453,9 +454,6 @@ paxos_node::receive_promises(const TimePoint timeout_time, paxos_msg::V &propval
 
                 if (not maybe_prom.has_value()) {
                         fmt::print("Timed out waiting for promises\n");
-                        // set our future to None
-//                        std::get<0>(returnval).clear();
-//                        retval.set_value_at_thread_exit(std::move(returnval));
                         return {};
                 }
 
@@ -508,7 +506,7 @@ bool paxos_node::receive_accepteds(const TimePoint timeout_time)
                 const auto &[sender, msg] = response.value();
 
                 // We only care about this if the node is responding to our most recent ballot.
-                // Otherwise, it's an old promise.
+                // Otherwise, it's an old message.
                 if (*balnum != msg.balnum)
                         continue;
 
@@ -533,11 +531,10 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                 accept_bals[accept.balnum.slot_num] = accept.balnum;
                 accept_vals[accept.balnum.slot_num] = accept.value;
 
-                paxos_msg::msg msg = paxos_msg::accepted_msg {accept.balnum};
+                paxos_msg::accepted_msg msg {accept.balnum};
 
                 auto payload = paxos_msg::encode_msg(msg);
 
-                // I don't care don't have time to learn how to implement the {fmt} API. Don't @ me.
                 say(fmt::format("Sending ACCEPTED to P_{} with ballot {}.",
                                 peer_id_of(proposer), accept.balnum));
 
@@ -545,16 +542,20 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                         proposer,
                         payload.c_str(), payload.size(),
                         0,
-                        "Choked on an ACCEPTED message."
+                        "Choked on an ACCEPTED message"
                 );
         }
 }
 
-void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision) {
+void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &decision)
+{
         say(fmt::format("Received DECIDE from P{} for slot {} with value {}.",
                         peer_id_of(sender), decision.slotnum, decision.val));
 
         set_leader(peers[sender].get());
+
+//        if (decision.slotnum > last_committed_slot)
+//                last_committed_slot = decision.slotnum;
 
         // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
         //  recover from. I don't believe this is part of the spec though.
@@ -562,40 +563,129 @@ void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &de
         // Increase the slot number of our ballot number, which corresponds to the depth of
         // our blockchain. We have decided this slot number, and so our next proposal should
         // try to gain consensus on the next slot.
-        if (decision.slotnum > balnum->slot_num) {
+        if (decision.slotnum > first_uncommitted_slot) {
                 // need to recover missing gaps in log
-                // TODO: send RECOVER<my_slotnum> to the leader; leader responds
-                //  with every transaction from my_slotnum to decision.slotnum
-
-//                cs171_cfg::send_with_delay(leader, RECOVER_REQ);
-
-                // TODO: don't do this unless we use synchronous I/O for recovery
-//                balnum->slot_num = decision.slotnum + 1;
-
-                // TODO: recover_log();
-                // We tell (leader? someone) that we are missing log[slot] entry.
-                // They send their log value at that slot. If they have a valid
-                // entry in the log at that slot number, then a quorum was reached at
-                // some point in time, so we know it is the correct value. If the peer
-                // doesn't know the log[slot] value, we need to ask someone else!
-
+                if (!awaiting_logresp)
+                        issue_logreq(sender, first_uncommitted_slot);
+                // also need to handle case where we get another DECIDE while waiting
+                // on a response to a LOGREQ: we don't want to issue another request
+                // that would contain redundant data; we just set a flag here or
+                // something that says "don't issue another LOGREQ if this flag is true,"
+                // and write the new decision(s) to the appropriate slots.
         } else {
-                assert(decision.slotnum == balnum->slot_num);
+                assert(decision.slotnum == first_uncommitted_slot);
 
-                blockchain::BLOCKCHAIN.transact(decision.val);
-                blag::BLAG.transact(decision.val);
+                commit(decision.val);
+                first_uncommitted_slot++;
                 balnum->slot_num++;
         }
 
         log[decision.slotnum] = decision.val;
-
-        // this handles the else (non-restore) case, as well as "pre-handling" the restore case
-//        accept_bals[decision.slotnum + 1] = {0, my_id, decision.slotnum + 1};
-
-
-        // initialize new accept_bal
-
 }
+
+void paxos_node::issue_logreq(cs171_cfg::socket_t dest, size_t slotnum)
+{
+        awaiting_logresp = true;
+
+        say(fmt::format("Issuing LOGREQ to P_{} starting from slot {}.",
+                        peer_id_of(dest), slotnum));
+
+        paxos_msg::logreq_msg msg {slotnum};
+
+        std::string payload = paxos_msg::encode_msg(msg);
+
+        cs171_cfg::send_with_delay(
+                dest,
+                payload.c_str(), payload.size(),
+                0,
+                "Choked on a LOGREQ message"
+        );
+}
+
+void paxos_node::issue_logresp(cs171_cfg::socket_t dest, size_t slotnum)
+{
+        std::forward_list<paxos_msg::V> vals {};
+        auto tail = vals.before_begin();
+        for (size_t i = slotnum; i < balnum->slot_num; i++)
+                tail = vals.insert_after(tail, *log[i]);
+
+        paxos_msg::logresp_msg response {
+                .slot = slotnum,
+                .vals = std::move(vals),
+        };
+
+        std::string payload = paxos_msg::encode_msg(response);
+
+        say(fmt::format("Sending LOGRESP to P_{} for slots {} to {}.",
+                                peer_id_of(dest), slotnum, balnum->slot_num-1));
+
+        cs171_cfg::send_with_delay(
+                dest,
+                payload.c_str(), payload.size(),
+                0,
+                "Choked on a LOGRESP message"
+        );
+}
+
+void paxos_node::receive_logreq(cs171_cfg::socket_t sender, const paxos_msg::logreq_msg &m)
+{
+        /*
+         * We assume we are the leader here, since nodes will *only* send log requests
+         * after receiving a decision from us.
+         */
+
+        say(fmt::format("Received LOGREQ from P_{} starting from slot {}.",
+                                peer_id_of(sender), m.slot));
+
+        assert(m.slot < balnum->slot_num); // YIKES
+
+        issue_logresp(sender, m.slot);
+}
+
+void paxos_node::receive_logresp(const paxos_msg::logresp_msg &m)
+{
+        // TODO: how do we know our slot number is caught up if we receive a DECIDE while
+        //  waiting for this response (after sending the request)?
+        //  We probably can't assume the leader won't have sent another DECIDE while
+        //  it was busy answering us since another node may have sent the DECIDE.
+        //  Added the `latest_slot` field to the node class--maybe that will be helpful?
+        //  ***
+        //  NO WAIT: we don't need to know this; we just set our balnum's slot to the
+        //  latest slot delivered in this message, and if any decisions have been issued in
+        //  the intervening time, we don't process them until *after* we receive this response!
+
+        say(fmt::format("Received LOGRESP for slots {} to {}.",
+                                m.slot, balnum->slot_num-1));
+
+        // commented out since we can also receive one of these in response to a proposal
+//        assert(awaiting_logresp);
+
+
+        // don't want to duplicate commit anything
+        // note: we can't just put a `continue` in the for loop
+        //  cause we may have actual log entries for future slots.
+        //  we just
+        size_t i = m.slot;
+        auto start = m.vals.cbegin();
+        while (log[i] && start != m.vals.cend()) {
+                ++i;
+                ++start;
+        }
+
+        for (; start != m.vals.cend(); ++start) {
+                log[i++] = *start;
+                commit(*start);
+        }
+
+        // TODO: double check with Jackson if this is safe
+        balnum->slot_num = first_uncommitted_slot = i;
+        awaiting_logresp = false;
+}
+
+template<class... Ts>
+struct msg_handler : Ts... { using Ts::operator()...; };
+template<class... Ts>
+msg_handler(Ts...) -> msg_handler<Ts...>;
 
 void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
 {
@@ -605,43 +695,32 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
             paxos_msg::msg_types[m.index()],
             peers.at(sender)->client_id);
 
-        switch (m.index()) {
-            case paxos_msg::PREPARE: {
-                receive_prepare(sender, std::get<paxos_msg::prepare_msg>(m));
-                break;
-            }
-
-            case paxos_msg::PROMISE: {
-                prom_q.push({sender, std::get<paxos_msg::promise_msg>(m)});
-                break;
-            }
-
-            case paxos_msg::ACCEPT: {
-                receive_accept(sender, std::get<paxos_msg::accept_msg>(m));
-                break;
-            }
-
-            case paxos_msg::ACCEPTED: {
-                acc_q.push({sender, std::get<paxos_msg::accepted_msg>(m)});
-                break;
-            }
-
-            case paxos_msg::DECIDE: {
-                receive_decide(sender, std::get<paxos_msg::decide_msg>(m));
-                break;
-            }
-
-            case paxos_msg::FWD_VAL: {
-                propose(std::get<paxos_msg::fwd_msg>(m).val);
-                break;
-            }
-
-            case paxos_msg::DUPLICATE:
-            case paxos_msg::HANDSHAKE_COMPLETE: {
-                assert(false);
-                break;
-            }
-        }
+        std::visit(msg_handler{
+                [sender, this] (const paxos_msg::prepare_msg &prep) {
+                        receive_prepare(sender, prep);
+                },
+                [sender, this] (const paxos_msg::promise_msg &prom) {
+                        prom_q.push({sender, prom});
+                },
+                [sender, this] (const paxos_msg::accept_msg &acc) {
+                        receive_accept(sender, acc);
+                },
+                [sender, this] (const paxos_msg::accepted_msg &accd) {
+                        acc_q.push({sender, accd});
+                },
+                [sender, this] (const paxos_msg::decide_msg &dec) {
+                        receive_decide(sender, dec);
+                },
+                [this] (const paxos_msg::fwd_msg &fwd) {
+                        propose(fwd.val);
+                },
+                [sender, this] (const paxos_msg::logreq_msg &recreq) {
+                    receive_logreq(sender, recreq);
+                },
+                [this] (const paxos_msg::logresp_msg &recresp) {
+                    receive_logresp(recresp);
+                }
+        }, m);
 }
 
 [[noreturn]]

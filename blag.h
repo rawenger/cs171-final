@@ -98,7 +98,7 @@ public:
         blag(const blag &other) = delete;
         blag(blag &&other) = delete;
 
-        auto transact(transaction trans) -> void;
+        auto transact(const transaction &trans) -> void;
 
         // Make a new blog post identified by the given title. 
 //        auto new_post(user author, content title, content body) -> void;
