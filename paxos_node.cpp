@@ -658,7 +658,7 @@ void paxos_node::receive_logresp(const paxos_msg::logresp_msg &m)
         //  it was busy answering us since another node may have sent the DECIDE.
         //  Added the `latest_slot` field to the node class--maybe that will be helpful?
         //  ***
-        //  NO WAIT: we don't need to know this; we just set our balnum's slot to the
+        //  NO WAIT: we don't need to know this; we just set our first uncommitted slot to the
         //  latest slot delivered in this message, and if any decisions have been issued in
         //  the intervening time, we don't process them until *after* we receive this response!
 
