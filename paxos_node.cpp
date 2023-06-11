@@ -547,6 +547,11 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                         0,
                         "Choked on an ACCEPTED message"
                 );
+//        } else if (my_state == LEARNER) {
+        // NOTE: this second way is much less efficient BUT it fixes the case
+        //  where we hang forever when we aren't connected to any leader
+        } else if (first_uncommitted_slot > accept.balnum.slot_num) {
+                issue_logresp(proposer, accept.balnum.slot_num);
         }
 }
 
@@ -657,8 +662,8 @@ void paxos_node::receive_logresp(const paxos_msg::logresp_msg &m)
         //  latest slot delivered in this message, and if any decisions have been issued in
         //  the intervening time, we don't process them until *after* we receive this response!
 
-        say(fmt::format("Received LOGRESP for slots {} to {}.",
-                                m.slot, balnum->slot_num-1));
+        say(fmt::format("Received LOGRESP starting from slot {}.",
+                                m.slot));
 
         // commented out since we can also receive one of these in response to a proposal
 //        assert(awaiting_logresp);
