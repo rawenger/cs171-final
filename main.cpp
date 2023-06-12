@@ -154,7 +154,7 @@ cs171_cfg::system_cfg::system_cfg()
         n_peers = 0;
 
         while (!in.eof()) {
-                if (in.peek() == '#') {
+                if (in.peek() == '#' || in.peek() == '\n') {
                         in.ignore(256, '\n');
                         continue;
                 }
