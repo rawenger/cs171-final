@@ -9,15 +9,16 @@
 
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/variant.hpp>
+#include <cereal/types/string.hpp>
 
 class blag {
 private:
         static constexpr size_t max_string_size = 128;
-        using user = char[max_string_size];
-        using content = char[max_string_size];
+        using user = std::string;
+        using content = std::string;
 	using timestamp = std::chrono::system_clock::time_point;
 
-        using raw_comment = std::pair<user, content>;
+        using raw_comment = std::pair<std::string, content>;
 
         struct comment {
                 std::string user;
@@ -42,8 +43,73 @@ public:
         static blag BLAG;
 
         // TODO: this would be much cleaner if done using polymorphism
-        struct post_transaction {
-                post_transaction(std::string &&author,
+        struct transaction {
+        protected:
+            static constexpr size_t format_trim_length = 8;
+        public:
+            std::string author;
+            std::string title;
+            std::string content;
+
+            transaction(const std::string_view &author,
+                        const std::string_view &title,
+                        const std::string_view &content)
+            : author(author), title(title), content(content)
+            { }
+
+            [[nodiscard]] virtual std::string formatter() const = 0;
+            virtual std::shared_ptr<transaction> allocate() = 0;
+
+            virtual ~transaction() = 0;
+
+            template <class Archive>
+            void serialize(Archive &ar) {
+                ar(author, title, content);
+            }
+
+            virtual void add_to_blag(blag &b) const = 0;
+
+            friend std::string format_as(const transaction *tr)
+            { tr->formatter(); }
+        };
+
+        struct post_transaction : public transaction {
+            post_transaction(const std::string_view &author,
+                                const std::string_view &title,
+                                const std::string_view &content)
+            : transaction(author, title, content)
+            { }
+
+            ~post_transaction() override = default;
+
+            void add_to_blag(blag &b) const override;
+            [[nodiscard]] std::string formatter() const override;
+
+            std::shared_ptr<transaction> allocate() override
+            { return std::make_shared<post_transaction>(std::move(*this)); }
+        };
+
+        struct comment_transaction : public transaction {
+            comment_transaction(const std::string_view &author,
+                                const std::string_view &title,
+                                const std::string_view &content)
+            : transaction(author, title, content)
+            { }
+
+            ~comment_transaction() override = default;
+
+            void add_to_blag(blag &b) const override;
+            [[nodiscard]] std::string formatter() const override;
+
+            std::shared_ptr<transaction> allocate() override
+            { return std::make_shared<comment_transaction>(std::move(*this)); }
+        };
+
+        struct stack_transaction {
+                static constexpr size_t max_string_size = 128;
+                using string_buf = char[max_string_size];
+
+                stack_transaction(std::string &&author,
                                  std::string &&title,
                                  std::string &&body)
                 {
@@ -52,48 +118,13 @@ public:
                     std::strncpy(this->body, body.c_str(), max_string_size);
                 }
 
-//                post_transaction(user author, content title, content body)
-//                {
-//                    std::strncpy(this->author, author, max_string_size);
-//                    std::strncpy(this->title, title, max_string_size);
-//                    std::strncpy(this->body, body, max_string_size);
-//                }
+                stack_transaction() = default;
 
-                post_transaction() = default;
+                string_buf body {0};
+                char title[64] {0};
+                char author[32] {0};
 
-                user author {0};
-                content title {0};
-                content body {0};
-
-		template <class Archive>
-		void serialize(Archive &ar) {
-			ar(author, title, body);
-		}
         };
-
-        struct comment_transaction {
-                comment_transaction(std::string &&commenter,
-                                    std::string &&title,
-                                    std::string &&comment)
-                {
-                    std::strncpy(this->commenter, commenter.c_str(), max_string_size);
-                    std::strncpy(this->title, title.c_str(), max_string_size);
-                    std::strncpy(this->comment, comment.c_str(), max_string_size);
-                }
-
-                comment_transaction() = default;
-
-                user commenter {0};
-                content title {0};
-                content comment {0};
-
-		template <class Archive>
-		void serialize(Archive &ar) {
-			ar(commenter, title, comment);
-		}
-        };
-
-	using transaction = std::variant<post_transaction, comment_transaction>;
 
         blag(const blag &other) = delete;
         blag(blag &&other) = delete;
@@ -118,4 +149,4 @@ public:
 
 std::string format_as(const blag::post_transaction &pt);
 std::string format_as(const blag::comment_transaction &ct);
-std::string format_as(const blag::transaction &tr);
+//std::string format_as(const blag::transaction &tr);

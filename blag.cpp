@@ -14,32 +14,49 @@ blag blag::BLAG;
 
 auto blag::transact(const transaction &trans) -> void
 {
-        if (std::holds_alternative<post_transaction>(trans)) {
-                // Commit a post to the blog.
-                timestamp stamp = std::chrono::system_clock::now();
-                const auto &post_trans = std::get<post_transaction>(trans);
-                post post = {
-                        .author = post_trans.author,
-                        .title = post_trans.title,
-                        .body = post_trans.body,
-                        .comments = {},
-                        .stamp = stamp,
-                };
-                posts.insert(std::make_pair(stamp, post));
-        }
-        else if (std::holds_alternative<comment_transaction>(trans)) {
-                // Commit a comment to the blog.
-                const auto &comm_trans = std::get<comment_transaction>(trans);
-                post *comment_on = find_post_with_title(comm_trans.title);
-                if (comment_on == nullptr) {
-                        // TODO: Silently fail if there is no blog with this title.
-                        return;
-                }
+        trans.add_to_blag(*this);
+}
 
-                comment comm {comm_trans.commenter, comm_trans.comment};
+void blag::post_transaction::add_to_blag(blag &b) const
+{
+        timestamp stamp = std::chrono::system_clock::now();
+        post post = {
+                .author = author,
+                .title = title,
+                .body = content,
+                .comments = {},
+                .stamp = stamp,
+        };
 
-                comment_on->comments.push_back(comm);
+        b.posts.insert(std::make_pair(stamp, post));
+}
+
+std::string blag::post_transaction::formatter() const
+{
+        return fmt::format("(post by @{}: \"{}\")",
+                           author,
+                           std::string_view{title.c_str(), format_trim_length});
+}
+
+void blag::comment_transaction::add_to_blag(blag &b) const
+{
+        post *comment_on = b.find_post_with_title(title);
+        if (comment_on == nullptr) {
+                // TODO: Silently fail if there is no blog with this title.
+                return;
         }
+
+        comment comm {author, content};
+
+        comment_on->comments.push_back(comm);
+}
+
+std::string blag::comment_transaction::formatter() const
+{
+        return fmt::format(R"((comment by @{} on post "{}": "{}"))",
+                           author,
+                           std::string_view{title.c_str(), format_trim_length},
+                           std::string_view{content.c_str(), format_trim_length});
 }
 
 auto blag::find_post_with_title(std::string_view title) -> post *
@@ -109,33 +126,26 @@ auto blag::view_comments(std::string_view title, std::ostream &out) -> void
 
 std::string format_as(const blag::post_transaction &pt)
 {
-        constexpr size_t trim_length = 8;
-        return fmt::format("(post by @{}: \"{}\")",
-                           pt.author,
-                           std::string_view{pt.title, trim_length});
+
 }
 
 std::string format_as(const blag::comment_transaction &ct)
 {
-        constexpr size_t trim_length = 8;
-        return fmt::format(R"((comment by @{} on post "{}": "{}"))",
-                           ct.commenter,
-                           std::string_view{ct.title, trim_length},
-                           std::string_view{ct.comment, trim_length});
+
 }
 
-// see https://en.cppreference.com/w/cpp/utility/variant/visit
-template<class... Ts>
-struct overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
 
-std::string format_as(const blag::transaction &tr)
-{
-        return std::visit(overloaded{
-                        [](const auto &arg) { return format_as(arg); }
-                }, tr);
-}
+//template<class... Ts>
+//struct overloaded : Ts... { using Ts::operator()...; };
+//template<class... Ts>
+//overloaded(Ts...) -> overloaded<Ts...>;
+//
+//std::string format_as(const blag::transaction &tr)
+//{
+//        return std::visit(overloaded{
+//                        [](const auto &arg) { return format_as(arg); }
+//                }, tr);
+//}
 
 // Make a new blog post identified by the given title.
 //auto blag::new_post(user author, content title, content body) -> void
@@ -151,18 +161,6 @@ std::string format_as(const blag::transaction &tr)
 //        transact(trans);
 //}
 
-// Make a new comment under the blog post with the given title.
-//auto blag::new_comment(content title, user commenter, content comment) -> void
-//{
-//        transaction trans;
-//        comment_transaction comm_trans = {
-//                .commenter = std::move(commenter),
-//                .title = std::move(title),
-//                .comment = std::move(comment),
-//        };
-//        trans = comm_trans;
-//        transact(trans);
-//}
 /*
 auto dummy_transactions(std::ostream &out) -> void
 {
@@ -192,3 +190,17 @@ auto dummy_transactions(std::ostream &out) -> void
         cool_peeps.all_posts(std::cout);
 }
 */
+
+// Make a new comment under the blog post with the given title.
+//auto blag::new_comment(content title, user commenter, content comment) -> void
+//{
+//        transaction trans;
+//        comment_transaction comm_trans = {
+//                .commenter = std::move(commenter),
+//                .title = std::move(title),
+//                .comment = std::move(comment),
+//        };
+//        trans = comm_trans;
+//        transact(trans);
+//}
+

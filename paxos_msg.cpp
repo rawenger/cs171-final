@@ -10,6 +10,7 @@
 #include <cereal/types/string.hpp>
 #include <cereal/types/variant.hpp>
 #include <cereal/types/forward_list.hpp>
+#include <cereal/types/memory.hpp>
 
 #include <sstream>
 
@@ -56,5 +57,10 @@ paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
 
 std::string format_as(std::optional<paxos_msg::V> optval)
 {
-        return optval ? fmt::format("{}", *optval) : "bottom";
+        return optval ? fmt::format("{}", (*optval)->formatter()) : "bottom";
+}
+
+std::string format_as(const paxos_msg::V &val)
+{
+        return val ? fmt::format("{}", val->formatter()) : "bottom";
 }

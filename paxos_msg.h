@@ -9,14 +9,40 @@
 #include <optional>
 #include <cassert>
 #include <forward_list>
+#include <memory>
 
 #include "cs171_cfg.h"
-#include "blockchain.h"
+#include "blag.h"
 
 extern cs171_cfg::node_id_t my_id;
 
 namespace paxos_msg {
-    using V = blag::transaction;
+    struct V {
+        using ptr_type = blag::transaction;
+        std::shared_ptr<ptr_type> ptr{nullptr};
+
+        V() = default;
+
+        explicit V(ptr_type &&tr)
+        : ptr(tr.allocate())
+        { }
+
+        operator bool() const
+        { return static_cast<bool>(ptr); }
+
+        auto &operator*() const
+        { return *ptr; }
+
+        auto operator->() const
+        { return ptr; }
+
+        template <class Archive>
+        void serialize(Archive &ar)
+        { ar(ptr); }
+
+//        V &operator=(V &&other) noexcept
+//        { ptr.swap(other.ptr); other.ptr.reset(nullptr); return *this; }
+    };
 
     using msg_size_t = uint16_t;
 
@@ -128,7 +154,7 @@ namespace paxos_msg {
 
             template<class Archive>
             void serialize(Archive &ar)
-            { ar(val); }
+            { ar(*val); }
     };
 
     struct decide_msg {
@@ -137,7 +163,7 @@ namespace paxos_msg {
 
         template<class Archive>
         void serialize(Archive &ar)
-        { ar(val); ar(slotnum); }
+        { ar(val, slotnum); }
     };
 
     struct promise_msg {
@@ -155,7 +181,7 @@ namespace paxos_msg {
 
         template<class Archive>
         void serialize(Archive &ar)
-        { ar(balnum); ar(acceptnum); ar(acceptval); }
+        { ar(balnum, acceptnum, acceptval); }
     };
 
     struct accept_msg {
@@ -164,7 +190,7 @@ namespace paxos_msg {
 
         template<class Archive>
         void serialize(Archive &ar)
-        { ar(balnum); ar(value); }
+        { ar(balnum, value); }
     };
 
     // recover request message
@@ -183,7 +209,7 @@ namespace paxos_msg {
 
         template<class Archive>
         void serialize(Archive &ar)
-        { ar(slot); ar(vals); }
+        { ar(slot, vals); }
     };
 
     // NOTE: has to match order above in msg_types array
@@ -204,3 +230,4 @@ namespace paxos_msg {
 //std::string format_as(paxos_msg::ballot_num ballot);
 
 std::string format_as(std::optional<paxos_msg::V> optval);
+std::string format_as(const paxos_msg::V &val);

@@ -9,6 +9,7 @@
 #include <array>
 
 #include "blag.h"
+#include "paxos_msg.h"
 
 using u256 = std::array<uint8_t, 32>;
 
@@ -24,7 +25,7 @@ using u256 = std::array<uint8_t, 32>;
 //    void serialize(Archive &ar) { ar(amt, sender, receiver); }
 //};
 
-using transaction = blag::transaction;
+using transaction = paxos_msg::V;
 
 class blockchain {
     struct block {

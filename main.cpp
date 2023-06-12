@@ -109,16 +109,16 @@ int main(int argc, char **argv)
                         break;
                     case input::KIND::POST:
                         node.propose(blag::post_transaction{
-                                std::string(cmd->post.author),
-                                std::string(cmd->post.title),
-                                std::string(cmd->post.body),
+                                cmd->post.author,
+                                cmd->post.title,
+                                cmd->post.body,
                         });
                         break;
                     case input::KIND::COMMENT:
                         node.propose(blag::comment_transaction{
-                                std::string(cmd->comment.commenter),
-                                std::string(cmd->comment.title),
-                                std::string(cmd->comment.comment),
+                                cmd->comment.commenter,
+                                cmd->comment.title,
+                                cmd->comment.comment,
                         });
                         break;
                     case input::KIND::BLOG:

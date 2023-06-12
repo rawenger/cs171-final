@@ -37,17 +37,17 @@ class sema_q {
 public:
     sema_q() = default;
 
-    void push(T i)
+    void push(T &&i)
     {
         std::shared_lock<decltype(dump_lk)> sl {dump_lk};
 
         if constexpr (multiple_writers) {
             std::lock_guard<decltype(write_lock)> lk {write_lock};
-            buf[tail] = i;
+            buf[tail] = std::forward<T>(i);
             tail = (tail + 1) & (bufsize - 1);
             size.release();
         } else {
-            buf[tail] = i;
+            buf[tail] = std::forward<T>(i);
             tail = (tail + 1) & (bufsize - 1);
             size.release();
         }

@@ -74,9 +74,9 @@ class paxos_node {
     NODE_STATE my_state;
 
     fs_buf<paxos_msg::ballot_num> balnum;
-    fs_buf<std::optional<paxos_msg::V>> log;
+    fs_buf<std::optional<paxos_msg::V>, int> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
-    fs_buf<std::optional<paxos_msg::V>> accept_vals;
+    fs_buf<std::optional<paxos_msg::V>, int> accept_vals;
     size_t first_uncommitted_slot {1}; // latest slot num we have received a DECISION for
     bool awaiting_logresp{false};
 
@@ -127,13 +127,17 @@ class paxos_node {
     bool has_connection_to(cs171_cfg::node_id_t id);
     bool connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_type &peer);
 
-    void commit(const paxos_msg::V &val)
+    void commit(const paxos_msg::V &val) //NOLINT(readability-convert-member-functions-to-static)
     { blockchain::BLOCKCHAIN.transact(val);
-                blag::BLAG.transact(val); }
+                blag::BLAG.transact(*val); }
 
 public:
     paxos_node(node_id_t my_id, std::string node_hostname);
-    void propose(paxos_msg::V value);
+    void propose(paxos_msg::V &&value);
+
+    template <typename ...Args>
+    void propose(Args&&... args)
+    { propose(paxos_msg::V{std::forward<Args>(args)...}); }
 
     cs171_cfg::node_id_t id() const { return my_id; } //NOLINT(modernize-use-nodiscard)
 

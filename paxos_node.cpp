@@ -192,10 +192,10 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
         std::thread{&paxos_node::request_worker, this}.detach();
 }
 
-void paxos_node::propose(paxos_msg::V value)
+void paxos_node::propose(paxos_msg::V &&value)
 {
         DBG("Proposing {}\n", value);
-        request_q.push(value);
+        request_q.push(std::forward<paxos_msg::V>(value));
 }
 
 bool paxos_node::fail_link(cs171_cfg::node_id_t peer_id)
@@ -261,9 +261,7 @@ void paxos_node::request_worker()
 {
         while (true) {
                 std::vector<cs171_cfg::socket_t> accept_targets{};
-                paxos_msg::V value;
-
-                value = request_q.front();
+                paxos_msg::V value = request_q.front();
 
                 auto lead = leader.load();
                 if (lead) {
@@ -690,6 +688,7 @@ void paxos_node::receive_logresp(const paxos_msg::logresp_msg &m)
         awaiting_logresp = false;
 }
 
+// see https://en.cppreference.com/w/cpp/utility/variant/visit
 template<class... Ts>
 struct msg_handler : Ts... { using Ts::operator()...; };
 template<class... Ts>
@@ -720,7 +719,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
                         receive_decide(sender, dec);
                 },
                 [this] (const paxos_msg::fwd_msg &fwd) {
-                        propose(fwd.val);
+                        propose(std::move(fwd.val));
                 },
                 [sender, this] (const paxos_msg::logreq_msg &recreq) {
                     receive_logreq(sender, recreq);
