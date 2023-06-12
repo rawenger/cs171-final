@@ -17,6 +17,8 @@
 extern cs171_cfg::node_id_t my_id;
 
 namespace paxos_msg {
+    struct stack_transaction;
+
     struct V {
         using ptr_type = blag::transaction;
         std::shared_ptr<ptr_type> ptr{nullptr};
@@ -26,6 +28,8 @@ namespace paxos_msg {
         explicit V(ptr_type &&tr)
         : ptr(tr.allocate())
         { }
+
+        explicit V(const stack_transaction &str);
 
         operator bool() const
         { return static_cast<bool>(ptr); }
@@ -39,10 +43,44 @@ namespace paxos_msg {
         template <class Archive>
         void serialize(Archive &ar)
         { ar(ptr); }
-
-//        V &operator=(V &&other) noexcept
-//        { ptr.swap(other.ptr); other.ptr.reset(nullptr); return *this; }
     };
+
+    struct stack_transaction {
+        static constexpr size_t max_string_size = 128;
+        using string_buf = char[max_string_size];
+        private:
+                void construct(std::string author,
+                               std::string title,
+                               std::string content)
+                {
+                    std::strncpy(this->author, author.c_str(), max_string_size);
+                    std::strncpy(this->title, title.c_str(), max_string_size);
+                    std::strncpy(this->content, content.c_str(), max_string_size);
+                }
+        public:
+                stack_transaction(std::string author,
+                                  std::string title,
+                                  std::string content)
+                { construct(author, title, content); }
+
+                stack_transaction(const std::optional<paxos_msg::V> &tr) {
+                        if (tr) {
+                                construct((*tr)->author, (*tr)->title, (*tr)->content);
+                                type = (*tr)->get_type();
+                        } else {
+                                valid = false;
+                        }
+                }
+
+                stack_transaction() = default;
+
+                string_buf content {0};
+                char title[64] {0};
+                char author[32] {0};
+                blag::transaction::TYPE type;
+
+                bool valid{true};
+        };
 
     using msg_size_t = uint16_t;
 
@@ -230,4 +268,4 @@ namespace paxos_msg {
 //std::string format_as(paxos_msg::ballot_num ballot);
 
 std::string format_as(std::optional<paxos_msg::V> optval);
-std::string format_as(const paxos_msg::V &val);
+std::string format_as(paxos_msg::V val);

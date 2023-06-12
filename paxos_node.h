@@ -74,9 +74,9 @@ class paxos_node {
     NODE_STATE my_state;
 
     fs_buf<paxos_msg::ballot_num> balnum;
-    fs_buf<std::optional<paxos_msg::V>, int> log;
+    fs_buf<std::optional<paxos_msg::V>, paxos_msg::stack_transaction> log;
     fs_buf<paxos_msg::ballot_num> accept_bals;
-    fs_buf<std::optional<paxos_msg::V>, int> accept_vals;
+    fs_buf<std::optional<paxos_msg::V>, paxos_msg::stack_transaction> accept_vals;
     size_t first_uncommitted_slot {1}; // latest slot num we have received a DECISION for
     bool awaiting_logresp{false};
 

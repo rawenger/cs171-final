@@ -47,20 +47,18 @@ paxos_msg::msg paxos_msg::decode_msg(const std::string &data)
         return res;
 }
 
-//std::string format_as(paxos_msg::ballot_num ballot)
-//{
-//        return fmt::format("({}, {}, {})",
-//                           ballot.seq_num,
-//                           ballot.node_pid,
-//                           ballot.slot_num);
-//}
-
 std::string format_as(std::optional<paxos_msg::V> optval)
 {
         return optval ? fmt::format("{}", (*optval)->formatter()) : "bottom";
 }
 
-std::string format_as(const paxos_msg::V &val)
+std::string format_as(paxos_msg::V val)
 {
-        return val ? fmt::format("{}", val->formatter()) : "bottom";
+        return val->formatter();
 }
+
+paxos_msg::V::V(const paxos_msg::stack_transaction &str)
+: ptr {(str.type == blag::transaction::POST)
+                        ? blag::post_transaction{str.author, str.title, str.content}.allocate()
+                        : blag::comment_transaction{str.author, str.title, str.content}.allocate()
+        } { }

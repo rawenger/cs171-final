@@ -47,6 +47,11 @@ public:
         protected:
             static constexpr size_t format_trim_length = 8;
         public:
+            enum TYPE : bool {
+                POST,
+                COMMENT,
+            };
+
             std::string author;
             std::string title;
             std::string content;
@@ -69,6 +74,8 @@ public:
 
             virtual void add_to_blag(blag &b) const = 0;
 
+            [[nodiscard]] virtual TYPE get_type() const = 0;
+
             friend std::string format_as(const transaction *tr)
             { tr->formatter(); }
         };
@@ -81,6 +88,9 @@ public:
             { }
 
             ~post_transaction() override = default;
+
+            [[nodiscard]] TYPE get_type() const override
+            { return transaction::POST; }
 
             void add_to_blag(blag &b) const override;
             [[nodiscard]] std::string formatter() const override;
@@ -98,32 +108,14 @@ public:
 
             ~comment_transaction() override = default;
 
+            [[nodiscard]] TYPE get_type() const override
+            { return transaction::COMMENT; }
+
             void add_to_blag(blag &b) const override;
             [[nodiscard]] std::string formatter() const override;
 
             std::shared_ptr<transaction> allocate() override
             { return std::make_shared<comment_transaction>(std::move(*this)); }
-        };
-
-        struct stack_transaction {
-                static constexpr size_t max_string_size = 128;
-                using string_buf = char[max_string_size];
-
-                stack_transaction(std::string &&author,
-                                 std::string &&title,
-                                 std::string &&body)
-                {
-                    std::strncpy(this->author, author.c_str(), max_string_size);
-                    std::strncpy(this->title, title.c_str(), max_string_size);
-                    std::strncpy(this->body, body.c_str(), max_string_size);
-                }
-
-                stack_transaction() = default;
-
-                string_buf body {0};
-                char title[64] {0};
-                char author[32] {0};
-
         };
 
         blag(const blag &other) = delete;

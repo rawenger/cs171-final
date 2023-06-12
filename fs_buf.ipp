@@ -23,12 +23,11 @@ static size_t round_to_pagesize(size_t sz)
                 : sz;
 }
 
-template<FS_BUF_T T>
-bool fs_buf<T>::grow_file(off_t newsize)
-{
+namespace fsbuf::detail {
+template<typename T, FS_BUF_T R>
+bool _fs_buf_base<T, R>::grow_file(off_t newsize) {
         if (lseek(backing_fd, newsize, SEEK_SET) < 0
-            || write(backing_fd, &dummydata, sizeof dummydata) < 0)
-        {
+            || write(backing_fd, &dummydata, sizeof dummydata) < 0) {
                 perror("Unable to grow backing file on disk");
                 exit(EXIT_FAILURE);
         }
@@ -36,10 +35,9 @@ bool fs_buf<T>::grow_file(off_t newsize)
         return true;
 }
 
-template<FS_BUF_T T>
-fs_buf<T>::fs_buf(const char *file_label)
-{
-        assert(T_size < sysconf(_SC_PAGESIZE));
+template<typename T, FS_BUF_T R>
+_fs_buf_base<T, R>::_fs_buf_base(const char *file_label) {
+        assert(R_size < sysconf(_SC_PAGESIZE));
 
         namespace fs = std::filesystem;
         auto filepath = fs::path{storage_path} / (std::to_string(my_id) + file_label);
@@ -73,11 +71,11 @@ fs_buf<T>::fs_buf(const char *file_label)
                 bufsize = round_to_pagesize(bufsize);
         }
 
-        buf = static_cast<T *>( mmap(nullptr,
-                                bufsize,
-                                PROT_READ | PROT_WRITE,
-                                MAP_FILE | MAP_SHARED,
-                                backing_fd, 0) );
+        buf = static_cast<R *>( mmap(nullptr,
+                                     bufsize,
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_FILE | MAP_SHARED,
+                                     backing_fd, 0));
 
         if (buf == MAP_FAILED) {
                 perror("unable to mmap from disk");
@@ -87,15 +85,14 @@ fs_buf<T>::fs_buf(const char *file_label)
         if (!do_restore) {
                 // IMPORTANT: we don't know that bufsize will be an integer
                 // multiple of T_size
-                for (size_t i = 0; i < bufsize / T_size; i++) {
+                for (size_t i = 0; i < bufsize / R_size; i++) {
                         std::construct_at(buf + i);
                 }
         }
 }
 
-template<FS_BUF_T T>
-fs_buf<T>::~fs_buf()
-{
+template<typename T, FS_BUF_T R>
+_fs_buf_base<T, R>::~_fs_buf_base() {
         if (buf) {
                 msync(buf, bufsize, MS_ASYNC);
                 munmap(buf, bufsize);
@@ -105,35 +102,33 @@ fs_buf<T>::~fs_buf()
                 close(backing_fd);
 }
 
-template<FS_BUF_T T>
-fs_buf<T>::fs_buf(fs_buf &&other) noexcept
-: bufsize(other.bufsize), buf(other.buf), backing_fd(other.backing_fd)
-{
+template<typename T, FS_BUF_T R>
+_fs_buf_base<T, R>::_fs_buf_base(_fs_buf_base &&other) noexcept
+        : bufsize(other.bufsize), buf(other.buf), backing_fd(other.backing_fd) {
         other.bufsize = 0;
         other.buf = nullptr;
         other.backing_fd = -1;
 }
 
-template<FS_BUF_T T>
-void fs_buf<T>::grow_to(size_t newsize)
-{
+template<typename T, FS_BUF_T R>
+void _fs_buf_base<T, R>::grow_to(size_t newsize) {
         grow_file(newsize);
 
         if (buf && buf != MAP_FAILED)
 #if !(defined(__linux__) && defined(_GNU_SOURCE))
-        {
-                msync(buf, bufsize, MS_ASYNC);
-                munmap(buf, bufsize);
-        }
+                {
+                        msync(buf, bufsize, MS_ASYNC);
+                        munmap(buf, bufsize);
+                }
 #else
-                buf = static_cast<T *>( mremap(buf, bufsize, newsize, MREMAP_MAYMOVE) );
+                buf = static_cast<R *>( mremap(buf, bufsize, newsize, MREMAP_MAYMOVE));
         else // notice this is here but not in the other #if branch lol
 #endif
-                buf = static_cast<T *>( mmap(nullptr,
-                                        newsize,
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_FILE | MAP_SHARED,
-                                        backing_fd, 0) );
+                buf = static_cast<R *>( mmap(nullptr,
+                                             newsize,
+                                             PROT_READ | PROT_WRITE,
+                                             MAP_FILE | MAP_SHARED,
+                                             backing_fd, 0));
 
         if (buf == MAP_FAILED) {
                 perror("Unable to grow disk buffer");
@@ -143,28 +138,28 @@ void fs_buf<T>::grow_to(size_t newsize)
         bufsize = newsize;
 }
 
-template<FS_BUF_T T>
-T &fs_buf<T>::operator[](size_t pos)
+template<typename T, FS_BUF_T R>
+T &_fs_buf_base<T, R>::operator[](size_t pos)
 {
         reserve(pos);
 
-        return buf[pos-1];
+        return buf[pos - 1];
 }
 
-template<FS_BUF_T T>
-void fs_buf<T>::reserve(size_t n_entries) {
-        size_t newsize = n_entries * T_size;
-
-        if (newsize <= bufsize)
+template<typename T, FS_BUF_T R>
+void _fs_buf_base<T, R>::reserve(size_t n_entries) {
+        if (!idx2high(n_entries))
                 return;
 
         size_t oldsize = bufsize;
 
-        newsize = round_to_pagesize(newsize);
+        size_t newsize = round_to_pagesize(n_entries * R_size);
 
         this->grow_to(newsize);
 
         // default construct new elements
-        for (size_t i = oldsize / T_size; i < newsize / T_size; i++)
+        for (size_t i = oldsize / R_size; i < newsize / R_size; i++)
                 std::construct_at(buf + i);
 }
+
+} // end namespace fsbuf::detail
