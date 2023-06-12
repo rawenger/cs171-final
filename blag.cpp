@@ -12,34 +12,49 @@
 
 blag blag::BLAG;
 
-auto blag::transact(const transaction &trans) -> void
+auto blag::transact(const transaction &trans) -> bool
 {
-        if (std::holds_alternative<post_transaction>(trans)) {
+        if (std::holds_alternative<post_transaction>(trans))
+        {
                 // Commit a post to the blog.
-                timestamp stamp = std::chrono::system_clock::now();
-                const auto &post_trans = std::get<post_transaction>(trans);
+                const auto &pt = std::get<post_transaction>(trans);
                 post post = {
-                        .author = post_trans.author,
-                        .title = post_trans.title,
-                        .body = post_trans.body,
+                        .author = pt.author,
+                        .title = pt.title,
+                        .body = pt.body,
                         .comments = {},
-                        .stamp = stamp,
+                        .stamp = pt.time,
                 };
-                posts.insert(std::make_pair(stamp, post));
-        }
-        else if (std::holds_alternative<comment_transaction>(trans)) {
-                // Commit a comment to the blog.
-                const auto &comm_trans = std::get<comment_transaction>(trans);
-                post *comment_on = find_post_with_title(comm_trans.title);
-                if (comment_on == nullptr) {
-                        // TODO: Silently fail if there is no blog with this title.
-                        return;
+
+                if (find_post_with_title(pt.title)) {
+                        fmt::print(stderr, "Post titled \"{}\" already exists\n.", pt.title);
+                        return false;
                 }
 
-                comment comm {comm_trans.commenter, comm_trans.comment};
+                fmt::print("@{} made a new post: \"{}\"\n",
+                           pt.author, pt.title);
+
+                posts.insert(std::make_pair(pt.time, post));
+        }
+        else if (std::holds_alternative<comment_transaction>(trans))
+        {
+                // Commit a comment to the blog.
+                const auto &ct = std::get<comment_transaction>(trans);
+                post *comment_on = find_post_with_title(ct.title);
+                if (comment_on == nullptr) {
+                        fmt::print(stderr, "No such post exists: \"{}\"\n.", ct.title);
+                        return false;
+                }
+
+                fmt::print("@{} commented on \"{}\"\n",
+                           ct.author, ct.title);
+
+                comment comm {ct.author, ct.comment};
 
                 comment_on->comments.push_back(comm);
         }
+
+        return true;
 }
 
 auto blag::find_post_with_title(std::string_view title) -> post *
@@ -119,7 +134,7 @@ std::string format_as(const blag::comment_transaction &ct)
 {
         constexpr size_t trim_length = 8;
         return fmt::format(R"((comment by @{} on post "{}": "{}"))",
-                           ct.commenter,
+                           ct.author,
                            std::string_view{ct.title, trim_length},
                            std::string_view{ct.comment, trim_length});
 }
@@ -136,59 +151,3 @@ std::string format_as(const blag::transaction &tr)
                         [](const auto &arg) { return format_as(arg); }
                 }, tr);
 }
-
-// Make a new blog post identified by the given title.
-//auto blag::new_post(user author, content title, content body) -> void
-//{
-//        // TODO: Don't default-initialize, find the magical candidate function that does it in place.
-//        transaction trans;
-//        post_transaction post_trans = {
-//                .author = author,
-//                .title = title,
-//                .body = body,
-//        };
-//        trans = post_trans;
-//        transact(trans);
-//}
-
-// Make a new comment under the blog post with the given title.
-//auto blag::new_comment(content title, user commenter, content comment) -> void
-//{
-//        transaction trans;
-//        comment_transaction comm_trans = {
-//                .commenter = std::move(commenter),
-//                .title = std::move(title),
-//                .comment = std::move(comment),
-//        };
-//        trans = comm_trans;
-//        transact(trans);
-//}
-/*
-auto dummy_transactions(std::ostream &out) -> void
-{
-        blag cool_peeps;
-        cool_peeps.all_posts(std::cout);
-        cool_peeps.new_post(
-                "jvns",
-                "Some blogging myths",
-                "A few years ago I gave a short talk (slides) about myths..."
-        );
-        cool_peeps.new_post(
-                "jvns",
-                "Introducing 'Implement DNS in a Weekend'",
-                "Hello! I’m excited to announce a project I’ve been working on for a long time..."
-        );
-        cool_peeps.all_posts_by("jvns", std::cout);
-        cool_peeps.all_posts_by("notjvns", std::cout);
-        cool_peeps.view_comments("Some blogging myths", std::cout);
-        cool_peeps.new_comment("Introducing 'Implement DNS in a Weekend'", "ryan", "i just stole a nameserver from comcast");
-        cool_peeps.new_comment("Introducing 'Implement DNS in a Weekend'", "jackson", "cool post julia");
-        cool_peeps.view_comments("Introducing 'Implement DNS in a Weekend'", std::cout);
-        cool_peeps.new_post(
-                "nystrom",
-                "Type Checking If Expressions",
-                "I have this hobby project I’ve been hacking on for several years. It’s a fantasy console..."
-        );
-        cool_peeps.all_posts(std::cout);
-}
-*/

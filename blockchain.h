@@ -28,7 +28,7 @@ using transaction = blag::transaction;
 
 class blockchain {
     struct block {
-        block(const transaction &t, block *prev=nullptr);
+        explicit block(const transaction &t, block *prev=nullptr);
         ~block() { delete P; }
         void compute_nonce();
         void hash(u256 &out);

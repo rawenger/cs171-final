@@ -26,6 +26,7 @@ struct input {
         BLOG,       // blog()
         VIEW,       // view(username)
         READ,       // read(title)
+        BAL,        // bal()
     } tag;
 
     // See: C++'s union-like classes. https://en.cppreference.com/w/cpp/language/union
@@ -42,7 +43,7 @@ struct input {
         struct {} blog;
         struct {std::string_view author;} view;
         struct {std::string_view title;} read;
-
+        struct {} bal;
     };
 };
 

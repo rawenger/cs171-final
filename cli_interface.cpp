@@ -31,7 +31,8 @@ auto parse_input(const std::string_view text) -> std::optional<input>
         case input::KIND::BLOCKCHAIN:
         case input::KIND::QUEUE:
         case input::KIND::LOG:
-        case input::KIND::BLOG: {
+        case input::KIND::BLOG:
+        case input::KIND::BAL: {
             break;
         }
 
@@ -210,6 +211,8 @@ static auto parse_name(const std::string_view text) -> std::optional<input::KIND
         kind = input::KIND::VIEW;
     } else if (text == "read") {
         kind = input::KIND::READ;
+    } else if (text == "bal") {
+        kind = input::KIND::BAL;
     }
 
     return kind;

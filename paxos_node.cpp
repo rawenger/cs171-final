@@ -118,6 +118,9 @@ void paxos_node::polling_loop(std::stop_token stoken, paxos_node *me) //NOLINT
                                 if (lead && lead->sock == pfd.fd) {
                                         DBG("Leader is down!\n");
                                         me->set_leader(nullptr);
+                                        NODE_STATE follower = FOLLOWER;
+                                        me->my_state.compare_exchange_strong(
+                                                follower, PREPARER);
                                 }
                                 close(pfd.fd);
                                 me->peers.erase(pfd.fd);
@@ -188,8 +191,8 @@ paxos_node::paxos_node(node_id_t my_id, std::string node_hostname)
 
         my_state = PREPARER;
 
-        polling_thread = std::jthread{polling_loop, this};
         std::thread{&paxos_node::request_worker, this}.detach();
+        polling_thread = std::jthread{polling_loop, this};
 }
 
 void paxos_node::propose(paxos_msg::V value)
@@ -252,13 +255,18 @@ std::string paxos_node::dump_log() const
 	return result;
 }
 
+std::string paxos_node::dump_ballot() const
+{
+        return fmt::format("{}", *balnum);
+}
+
 /************************************************************************************
  *                              PRIVATE MEMBER FUNCTIONS
  ************************************************************************************/
 
-
 void paxos_node::request_worker()
 {
+        DBG("Started request queue worker thread\n");
         while (true) {
                 std::vector<cs171_cfg::socket_t> accept_targets{};
                 paxos_msg::V value;
@@ -269,7 +277,7 @@ void paxos_node::request_worker()
                 if (lead) {
                         forward_msg(lead, value);
                         request_q.pop();
-                        return;
+                        continue;
                 }
 
                 if (my_state == LEARNER) { // I am the leader
@@ -285,6 +293,9 @@ void paxos_node::request_worker()
                 if (!accept_targets.empty() && broadcast_accept(value, accept_targets)) {
                         request_q.pop();
                         broadcast_decision(value);
+                } else {
+                        NODE_STATE learner = LEARNER;
+                        my_state.compare_exchange_strong(learner, PREPARER);
                 }
         }
 }
@@ -294,6 +305,7 @@ std::vector<cs171_cfg::socket_t> paxos_node::broadcast_prepare(paxos_msg::V &val
         // Increment the sequence number of our ballot. This is a fresh proposal.
         balnum->seq_num += 1;
         balnum->node_pid = my_id;
+//        balnum->slot_num = first_uncommitted_slot;
 
         paxos_msg::prepare_msg msg {*balnum};
 
@@ -547,9 +559,6 @@ void paxos_node::receive_accept(socket_t proposer, const paxos_msg::accept_msg &
                         0,
                         "Choked on an ACCEPTED message"
                 );
-//        } else if (my_state == LEARNER) {
-        // NOTE: this second way is much less efficient BUT it fixes the case
-        //  where we hang forever when we aren't connected to any leader
         } else if (first_uncommitted_slot > accept.balnum.slot_num) {
                 issue_logresp(proposer, accept.balnum.slot_num);
         }
@@ -562,11 +571,7 @@ void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &de
 
         set_leader(peers[sender].get());
 
-//        if (decision.slotnum > last_committed_slot)
-//                last_committed_slot = decision.slotnum;
-
-        // TODO: Don't commit immediately, write the value to a log -- there may be gaps we need to
-        //  recover from. I don't believe this is part of the spec though.
+        my_state = FOLLOWER;
 
         // Increase the slot number of our ballot number, which corresponds to the depth of
         // our blockchain. We have decided this slot number, and so our next proposal should
@@ -580,9 +585,7 @@ void paxos_node::receive_decide(socket_t sender, const paxos_msg::decide_msg &de
                 // that would contain redundant data; we just set a flag here or
                 // something that says "don't issue another LOGREQ if this flag is true,"
                 // and write the new decision(s) to the appropriate slots.
-        } else {
-                assert(decision.slotnum == first_uncommitted_slot);
-
+        } else if (decision.slotnum == first_uncommitted_slot) {
                 commit(decision.val);
                 first_uncommitted_slot++;
                 balnum->slot_num++;
@@ -734,6 +737,7 @@ void paxos_node::handle_msg(socket_t sender, paxos_msg::msg &&m)
 [[noreturn]]
 void paxos_node::listen_connections()
 {
+        DBG("Started connection listener thread\n");
         socket_t in_sock = socket(AF_INET, SOCK_STREAM, 0);
         if (in_sock < 0) {
                 perror("Unable to create in-socket");
@@ -865,6 +869,7 @@ bool paxos_node::connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_
                 pmut.unlock();
                 return false;
         }
+
         new_peer(sock, id); // need this up here so listener thread can learn of duplicates
         pmut.unlock();
 
@@ -885,6 +890,7 @@ bool paxos_node::connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_
         if (handshake == paxos_msg::DUPLICATE) {
                 pmut.lock();
                 peers.erase(sock);
+                update_pfds.test_and_set();
                 pmut.unlock();
                 return false;
         }

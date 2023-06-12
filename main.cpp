@@ -48,7 +48,7 @@ int main(int argc, char **argv)
         /* Constructing this object will open and parse the config.csv file */
         config = new cs171_cfg::system_cfg {};
 
-        paxos_node node{my_id, my_hostname};
+        auto node = std::make_unique<paxos_node>(my_id, my_hostname);
 
         while (true) {
                 std::string in;
@@ -75,7 +75,7 @@ int main(int argc, char **argv)
                         break;
                     case input::KIND::FAIL_LINK: {
                         cs171_cfg::node_id_t dest = cmd->fail_link.dest;
-                        if (node.fail_link(dest)) {
+                        if (node->fail_link(dest)) {
                                 fmt::print("Successfully severed link with P{}\n", dest);
                         } else {
                                 fmt::print(stderr, "Failed to sever link with P{}\n", dest);
@@ -84,7 +84,7 @@ int main(int argc, char **argv)
                     }
                     case input::KIND::FIX_LINK: {
                         cs171_cfg::node_id_t dest = cmd->fix_link.dest;
-                        if (node.fix_link(dest)) {
+                        if (node->fix_link(dest)) {
                                 fmt::print("Repaired link with P{}\n", dest);
                         } else {
                                 fmt::print(stderr, "Unable to repair link to P{}\n", dest);
@@ -102,20 +102,20 @@ int main(int argc, char **argv)
                         fmt::print("{}\n", blockchain::BLOCKCHAIN.get_history());
                         break;
                     case input::KIND::QUEUE:
-                        fmt::print("{}\n", node.dump_op_queue());
+                        fmt::print("{}\n", node->dump_op_queue());
                         break;
                     case input::KIND::LOG:
-                        fmt::print("{}\n", node.dump_log());
+                        fmt::print("{}\n", node->dump_log());
                         break;
                     case input::KIND::POST:
-                        node.propose(blag::post_transaction{
+                        node->propose(blag::post_transaction{
                                 std::string(cmd->post.author),
                                 std::string(cmd->post.title),
                                 std::string(cmd->post.body),
                         });
                         break;
                     case input::KIND::COMMENT:
-                        node.propose(blag::comment_transaction{
+                        node->propose(blag::comment_transaction{
                                 std::string(cmd->comment.commenter),
                                 std::string(cmd->comment.title),
                                 std::string(cmd->comment.comment),
@@ -129,6 +129,9 @@ int main(int argc, char **argv)
                         break;
                     case input::KIND::READ:
                         blag::BLAG.view_comments(cmd->read.title, std::cout);
+                        break;
+                    case input::KIND::BAL:
+                        fmt::print("{}\n", node->dump_ballot());
                         break;
                 }
         }

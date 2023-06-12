@@ -24,46 +24,6 @@ blockchain blockchain::BLOCKCHAIN;
 static EVP_MD_CTX *sha256_ctx;
 #endif
 
-//template<>
-//struct fmt::formatter<transaction> {
-//    char presentation = 'f'; // 'f' means tuple form (for printing); 'e' is raw concat (for hashing)
-//    // Parses format specifications of the form ['f' | 'e'].
-//    constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-//            auto it = ctx.begin(), end = ctx.end();
-//            if (it != end && (*it == 'f' || *it == 'e')) presentation = *it++;
-//
-//            // Check if reached the end of the range:
-//            if (it != end && *it != '}') throw format_error("invalid format");
-//
-//            // Return an iterator past the end of the parsed range:
-//            return it;
-//    }
-//
-//    // Formats the point p using the parsed format specification (presentation)
-//    // stored in this formatter.
-//    template<typename FormatContext>
-//    auto format(const transaction &tr, FormatContext &ctx) const -> decltype(ctx.out()) {
-//            // ctx.out() is an output iterator to write to.
-//            return presentation == 'e'
-//                        ? fmt::format_to(ctx.out(), "P{}P{}${}", tr.sender, tr.receiver, tr.amt)
-//                        : fmt::format_to(ctx.out(), "P{}, P{}, ${}", tr.sender, tr.receiver, tr.amt);
-//    }
-//};
-
-
-//template<>
-//struct fmt::formatter<blockchain::block> {
-//    constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-//            return ctx.end();
-//    }
-//
-//    template <typename FormatContext>
-//    auto format(const blockchain::block &blk, FormatContext &ctx) const -> decltype(ctx.out()) {
-////            return fmt::format_to(ctx.out(), "({:f}, {})", blk.T, blk.H);
-//            return fmt::format_to(ctx.out(), "({}, {})", blk.T, blk.H);
-//    }
-//};
-
 template<>
 struct fmt::formatter<u256> {
     constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
@@ -81,7 +41,6 @@ std::string format_as(const blockchain::block &blk)
 {
         return fmt::format("({}, {})", blk.T, blk.H);
 }
-
 
 blockchain::block::block(const transaction &t, block *prev)
  :      P(prev),
@@ -135,7 +94,6 @@ void blockchain::block::hash(u256 &out)
         EVP_DigestFinal_ex(sha256_ctx, out.data(), &sha_size);
 #endif
         assert(sha_size == 32);
-
 }
 
 blockchain::blockchain()

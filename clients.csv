@@ -1,6 +1,19 @@
 #P0, localhost, 9004
-P1, localhost, 9001
-P2, localhost, 9002
-P3, localhost, 9003
-P4, localhost, 9004
-P5, localhost, 9005
+P1, fedora-xeon.local, 9001
+P2, fedora-xeon.local, 9002
+P3, fedora-xeon.local, 9003
+P4, fedora-xeon.local, 9004
+P5, fedora-xeon.local, 9005
+P6, fedora-xeon.local, 9006
+P7, fedora-xeon.local, 9007
+P8, fedora-xeon.local, 9008
+P9, fedora-xeon.local, 9009
+P10, fedora-xeon.local, 9010
+#
+P11, spruce.local, 9000
+P12, spruce.local, 9001
+#
+P13, ryans-mac-mini.local, 9000
+P14, ryans-mac-mini.local, 9001
+P15, ryans-mac-mini.local, 9002
+P16, ryans-mac-mini.local, 9003

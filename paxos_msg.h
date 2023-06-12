@@ -27,8 +27,8 @@ namespace paxos_msg {
             "ACCEPTED",
             "DECIDE",
             "FWD_VAL",
-            "RECOVER_REQ",
-            "RECOVER_RESP",
+            "LOG_REQ",
+            "LOG_RESP",
             // NOTE: No entries after these.
             "DUPLICATE",
             "HANDSHAKE_COMPLETE",

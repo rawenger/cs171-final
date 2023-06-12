@@ -9,11 +9,12 @@
 
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/variant.hpp>
+#include <cereal/types/chrono.hpp>
 
 class blag {
 private:
         static constexpr size_t max_string_size = 128;
-        using user = char[max_string_size];
+        using user = char[32];
         using content = char[max_string_size];
 	using timestamp = std::chrono::system_clock::time_point;
 
@@ -46,28 +47,24 @@ public:
                 post_transaction(std::string &&author,
                                  std::string &&title,
                                  std::string &&body)
+                : time(std::chrono::system_clock::now())
                 {
-                    std::strncpy(this->author, author.c_str(), max_string_size);
+                    std::strncpy(this->author, author.c_str(), 32);
                     std::strncpy(this->title, title.c_str(), max_string_size);
                     std::strncpy(this->body, body.c_str(), max_string_size);
                 }
 
-//                post_transaction(user author, content title, content body)
-//                {
-//                    std::strncpy(this->author, author, max_string_size);
-//                    std::strncpy(this->title, title, max_string_size);
-//                    std::strncpy(this->body, body, max_string_size);
-//                }
-
                 post_transaction() = default;
 
-                user author {0};
                 content title {0};
+                user author {0};
                 content body {0};
+
+                timestamp time {};
 
 		template <class Archive>
 		void serialize(Archive &ar) {
-			ar(author, title, body);
+			ar(author, title, body, time);
 		}
         };
 
@@ -76,20 +73,20 @@ public:
                                     std::string &&title,
                                     std::string &&comment)
                 {
-                    std::strncpy(this->commenter, commenter.c_str(), max_string_size);
+                    std::strncpy(this->author, commenter.c_str(), sizeof(this->author));
                     std::strncpy(this->title, title.c_str(), max_string_size);
                     std::strncpy(this->comment, comment.c_str(), max_string_size);
                 }
 
                 comment_transaction() = default;
 
-                user commenter {0};
+                user author {0};
                 content title {0};
                 content comment {0};
 
 		template <class Archive>
 		void serialize(Archive &ar) {
-			ar(commenter, title, comment);
+			ar(author, title, comment);
 		}
         };
 
@@ -98,7 +95,7 @@ public:
         blag(const blag &other) = delete;
         blag(blag &&other) = delete;
 
-        auto transact(const transaction &trans) -> void;
+        auto transact(const transaction &trans) -> bool;
 
         // Make a new blog post identified by the given title. 
 //        auto new_post(user author, content title, content body) -> void;

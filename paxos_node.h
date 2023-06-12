@@ -34,8 +34,6 @@ struct peer_connection {
 
     ~peer_connection() { disconnect(); }
 
-//    void send(timestamp_t time, decltype(peer_msg::type) type) const;
-
     socket_t sock {};
     node_id_t client_id {};
 };
@@ -71,7 +69,7 @@ class paxos_node {
     // only modified in polling thread
     std::atomic<const peer_connection *> leader {nullptr};
 
-    NODE_STATE my_state;
+    std::atomic<NODE_STATE> my_state;
 
     fs_buf<paxos_msg::ballot_num> balnum;
     fs_buf<std::optional<paxos_msg::V>> log;
@@ -127,9 +125,8 @@ class paxos_node {
     bool has_connection_to(cs171_cfg::node_id_t id);
     bool connect_to(const decltype(cs171_cfg::system_cfg::peers)::value_type &peer);
 
-    void commit(const paxos_msg::V &val)
-    { blockchain::BLOCKCHAIN.transact(val);
-                blag::BLAG.transact(val); }
+    void commit(const paxos_msg::V &val) //NOLINT(readability-convert-member-functions-to-static)
+    { if (blag::BLAG.transact(val)) blockchain::BLOCKCHAIN.transact(val); }
 
 public:
     paxos_node(node_id_t my_id, std::string node_hostname);
@@ -141,4 +138,5 @@ public:
     bool fix_link(cs171_cfg::node_id_t peer_id);
     std::string dump_op_queue();
     std::string dump_log() const; //NOLINT(modernize-use-nodiscard)
+    std::string dump_ballot() const;
 };
